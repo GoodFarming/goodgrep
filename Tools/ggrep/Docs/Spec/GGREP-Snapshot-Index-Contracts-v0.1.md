@@ -178,9 +178,8 @@ Log rotation MUST be deterministic and MUST NOT affect publish behavior.
   - store directories `0770` with `setgid`, files `0660`, or
   - equivalent ACL inheritance on supported platforms.
 - Mixed modes are not allowed: a store MUST be created as single-user or shared-store and keep that policy.
-- Shared-store on network filesystems (NFS/SMB) is supported only on mounts that provide strong consistency,
-  atomic rename, and reliable exclusive-create semantics for leases; if not guaranteed, shared-store MUST be
-  refused and per-worktree stores used instead.
+- Phase II scope: shared-store MUST be local filesystem only (same-host, same-group). Shared-store on network
+  filesystems (NFS/SMB) MUST be refused; use per-worktree stores instead.
 - Shared-store mode MUST perform a capability check at startup (exclusive-create, rename, read-after-write) and
   fail fast if the filesystem does not meet required semantics.
   - The capability check MUST attempt: exclusive-create (`O_EXCL`) guard acquisition, write+fsync+read-after-write,

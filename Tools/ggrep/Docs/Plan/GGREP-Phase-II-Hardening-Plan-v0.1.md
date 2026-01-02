@@ -9,6 +9,8 @@ Scope: Tools/ggrep in goodgrep repo
 - Supported OS: Linux-only (Phase II does not target Windows/macOS).
 - Embedding runtime: CPU-only (no CUDA/GPU requirements).
 - IPC transport: Unix domain sockets (no Windows named pipes in Phase II).
+- Filesystems: local only (Phase II does not support shared-store on NFS/SMB/network mounts).
+- Shared-store scope: same-host, same-group (POSIX group/ACL permissions; no multi-host coordination).
 
 Windows/macOS-specific notes may remain in docs as *future* work, but are not Phase II gating items.
 
@@ -89,7 +91,7 @@ reliable under concurrent agent usage and frequent retrievals.
 - Artifact download integrity (checksum/validation) and concurrency safety (per-artifact locks + atomic writes).
 - Store identity strategy (per worktree vs shared store).
 - Shared-store permission model (single-user default; multi-user via explicit ACLs).
-- Shared-store network filesystem policy (NFS/SMB lock + rename semantics).
+- Shared-store network filesystem policy: refuse NFS/SMB/network mounts in Phase II (local FS only).
 - Shared-store capability checks (exclusive-create/rename/read-after-write).
 - Shared-store filesystem capability probe (Linux): validate rename + O_EXCL + read-after-write; refuse weak mounts by default.
 - IPC framing + payload limits (length-prefixed JSON, max request/response bytes).

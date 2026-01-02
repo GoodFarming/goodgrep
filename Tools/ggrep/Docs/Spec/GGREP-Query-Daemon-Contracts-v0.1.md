@@ -137,6 +137,19 @@ For each query request:
 5) **Format**
    - Format output according to the requested profile/snippet mode.
 
+## Path Scoping (Folder Search)
+
+To support “search within a folder”, query requests MAY include an optional `path` scope.
+
+- If `path` is present, it MUST be an absolute path under the daemon’s `canonical_root`; otherwise the daemon MUST
+  reject with `invalid_request`.
+- If `path` is a directory, the daemon MUST restrict results to files whose stored path begins with that directory
+  prefix.
+- If `path` is a file, the daemon SHOULD treat it as an exact match (or a prefix with an added trailing separator)
+  to avoid accidental overmatch.
+- CLI UX recommendation: when invoked without an explicit path argument, the CLI SHOULD send the current working
+  directory as `path` so `ggrep "query"` searches “here” by default while still using the repo-root store.
+
 ## Output Safety And Sanitization
 
 CLI output MUST be safe by default (`IPC.MUST.003`):
@@ -539,7 +552,8 @@ The daemon endpoint MUST be namespaced at least by:
 This prevents cross-config daemon collisions in multi-agent environments.
 
 Implementations MUST ensure socket paths remain within OS limits (e.g., Unix `sockaddr_un` length). Use short
-hash paths or temp-directory indirection when necessary.
+hash paths by default (recommended: `~/.ggrep/daemon/<hash(store_id+config_fingerprint)>.sock`) rather than long
+human-readable paths. Temp-directory indirection may be used as a fallback.
 
 ## Defaults (Wave II)
 

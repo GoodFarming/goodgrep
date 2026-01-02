@@ -29,8 +29,8 @@ Scope: `Tools/ggrep`
 
 ### Target environments + deployment assumptions
 - [x] Confirm supported OS targets (Linux-only)
-- [ ] Confirm filesystem support policy (local FS only vs NFS/SMB support)
-- [ ] Confirm shared-store scope (single-user, multi-user same host, or multi-host)
+- [x] Confirm filesystem support policy (local FS only)
+- [x] Confirm shared-store scope (same-host, same-group)
 
 ### Storage engine and durability assumptions
 - [ ] Pin LanceDB/lance versions for Phase II
@@ -98,7 +98,7 @@ Scope: `Tools/ggrep`
 
 ### Shared-store + platform policies
 - [ ] Confirm shared-store untracked policy (exclude by default; explicit opt-in)
-- [ ] Confirm shared-store network filesystem policy (NFS/SMB lock + rename semantics)
+- [x] Confirm shared-store network filesystem policy (Phase II: refuse NFS/SMB; local FS only)
 - [ ] Confirm shared-store capability checks (exclusive-create/rename/read-after-write)
 
 ### Deferred (out of scope for Phase II, Linux-only)
@@ -109,6 +109,7 @@ Scope: `Tools/ggrep`
 - [ ] Confirm CLI <-> daemon protocol handshake + compatibility policy (protocol_version + supported schema versions)
 - [ ] Confirm config change debounce and stale daemon auto-restart behavior
 - [ ] Confirm query error contract (busy/timeout JSON + exit codes)
+- [x] Confirm folder scoping behavior (CLI defaults scope to cwd; optional `path` restricts results)
 - [ ] Confirm explainability contract (`--explain` + JSON meta)
 - [ ] Confirm per-query resource caps (candidate/snippet caps) and interruptible cancellation requirements
 - [ ] Confirm anti-starvation mechanism (reserved sync permits)

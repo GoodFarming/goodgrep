@@ -101,3 +101,31 @@ This is not a design doc; it’s a reference bundle to avoid “unknown unknowns
 ## Notes / Follow-ups (if needed later)
 - If we decide to support shared-store over NFS/SMB, we should add explicit “filesystem capability probes” and a documented support matrix.
 - If we decide to rely on LanceDB for certain durability properties, we should verify (in code/tests) what “commit” guarantees on local FS and whether additional fsync is needed around tables/directories.
+
+## 7) Linux filesystem type detection (local vs network mounts)
+
+### Source
+- `statfs(2)` — Linux man-pages: https://man7.org/linux/man-pages/man2/statfs.2.html
+
+### Key points (from man-pages)
+- `statfs()` returns a filesystem type (`f_type`) for a given path.
+- FS type codes can be used to detect common network mounts (e.g., NFS/CIFS) when implementing a “local-only” policy.
+
+### Implications for GGREP
+- For Phase II (local-only), shared-store can conservatively refuse known network mount types using `statfs()` as an
+  additional guardrail (on top of capability probes).
+
+## 8) Linux permissions: umask and setgid directories (shared-store group mode)
+
+### Sources
+- `umask(2)` — Linux man-pages: https://man7.org/linux/man-pages/man2/umask.2.html
+- `chmod(2)` — Linux man-pages: https://man7.org/linux/man-pages/man2/chmod.2.html
+
+### Key points (from man-pages)
+- File creation permissions are masked by the process umask; `mkdir()`/`open()` mode arguments are not absolute.
+- The setgid bit on a directory causes new files/directories to inherit the directory’s group id (useful for
+  same-host/same-group shared stores).
+
+### Implications for GGREP
+- Shared-store creation should explicitly set directory permissions (e.g., `0770` + setgid) and file permissions
+  (e.g., `0660`) rather than relying on umask defaults, and should validate permissions at startup.

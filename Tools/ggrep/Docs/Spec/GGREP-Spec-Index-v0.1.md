@@ -8,6 +8,8 @@ Purpose: Declare normative ownership and schema versions to prevent spec drift.
 
 - Supported OS: Linux-only (Windows/macOS deferred).
 - Embedding runtime: CPU-only (no CUDA/GPU requirements).
+- Filesystems: local only (no NFS/SMB shared-store in Phase II).
+- Shared-store scope: same-host, same-group.
 
 Platform-specific notes may appear in specs as informative future work, but are not Phase II gating items.
 

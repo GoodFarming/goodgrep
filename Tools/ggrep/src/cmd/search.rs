@@ -116,8 +116,9 @@ pub async fn execute(
    store_id: Option<String>,
 ) -> Result<()> {
    let cwd = std::env::current_dir()?.canonicalize()?;
-   let default_root = git::get_repo_root(&cwd).unwrap_or_else(|| cwd.clone());
-   let filter_path = path.unwrap_or(default_root).canonicalize()?;
+   // Default to searching "here" (current directory) while still using the
+   // repo-root store when in a git repo.
+   let filter_path = path.unwrap_or_else(|| cwd.clone()).canonicalize()?;
    let index_root = git::get_repo_root(&filter_path).unwrap_or_else(|| filter_path.clone());
    let index_root = index_root.canonicalize()?;
 
