@@ -129,3 +129,26 @@ This is not a design doc; it’s a reference bundle to avoid “unknown unknowns
 ### Implications for GGREP
 - Shared-store creation should explicitly set directory permissions (e.g., `0770` + setgid) and file permissions
   (e.g., `0660`) rather than relying on umask defaults, and should validate permissions at startup.
+
+## 9) Linux exclusive-create semantics (`O_EXCL`) for leases/guards
+
+### Source
+- `open(2)` — Linux man-pages: https://man7.org/linux/man-pages/man2/open.2.html
+
+### Key points (from man-pages)
+- `O_CREAT | O_EXCL` provides exclusive-create semantics: the call fails if the path already exists.
+- Some filesystems and network mounts can have surprising behavior; this reinforces the Phase II “local-only” policy.
+
+### Implications for GGREP
+- Writer lease updates and short-lived guards should use exclusive-create + TTL to serialize writers without holding long locks.
+
+## 10) Linux file watching semantics (why reconciliation is required)
+
+### Source
+- `inotify(7)` — Linux man-pages: https://man7.org/linux/man-pages/man7/inotify.7.html
+
+### Key points (from man-pages)
+- Watcher events are not an SSOT: events can be dropped (queue overflow) and some changes may not be reported depending on watcher configuration.
+
+### Implications for GGREP
+- The contracts’ stance that watcher events are “hints” and periodic reconciliation is required is aligned with the underlying Linux watcher model.
