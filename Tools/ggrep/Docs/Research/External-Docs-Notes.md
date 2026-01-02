@@ -66,18 +66,6 @@ This is not a design doc; it’s a reference bundle to avoid “unknown unknowns
 ### Implications for GGREP
 - Our Phase II “durability barrier” and “single writer” assumptions align with Lance’s direction: if the underlying store can’t guarantee atomic commit primitives, we must provide external locking/fencing.
 - For “segment writes”, we should treat the Lance dataset/table commit boundary as the underlying durability unit, then add GGREP’s own manifest + pointer swap barrier.
-
-## 6) Unix domain sockets: path length limits (Linux)
-
-### Source
-- `unix(7)` — Linux man-pages: https://man7.org/linux/man-pages/man7/unix.7.html
-
-### Key points (from man-pages)
-- The `sockaddr_un.sun_path` field for AF_UNIX sockets has a small fixed maximum length (platform-dependent; commonly ~108 bytes on Linux).
-- Long socket paths can fail with errors like `ENAMETOOLONG`.
-
-### Implications for GGREP
-- IPC endpoint paths must be short and deterministic (hashed subpaths under `~/.ggrep/daemon/…`), and the plan should keep a mitigation strategy for very long `store_id` values.
 ## 4) LanceDB (Rust API) — vector column type expectation
 
 ### Source
@@ -98,6 +86,18 @@ This is not a design doc; it’s a reference bundle to avoid “unknown unknowns
 ### Implications for GGREP
 - Phase II should standardize “CPU-only” as the baseline build profile and ensure no CUDA-only dependencies are required.
 - Any “optional GPU acceleration” should remain a separate feature path (out of scope for the Linux+CPU-only Phase II track).
+
+## 6) Unix domain sockets: path length limits (Linux)
+
+### Source
+- `unix(7)` — Linux man-pages: https://man7.org/linux/man-pages/man7/unix.7.html
+
+### Key points (from man-pages)
+- The `sockaddr_un.sun_path` field for AF_UNIX sockets has a small fixed maximum length (platform-dependent; commonly ~108 bytes on Linux).
+- Long socket paths can fail with errors like `ENAMETOOLONG`.
+
+### Implications for GGREP
+- IPC endpoint paths must be short and deterministic (hashed subpaths under `~/.ggrep/daemon/…`), and the plan should keep a mitigation strategy for very long `store_id` values.
 ## Notes / Follow-ups (if needed later)
 - If we decide to support shared-store over NFS/SMB, we should add explicit “filesystem capability probes” and a documented support matrix.
 - If we decide to rely on LanceDB for certain durability properties, we should verify (in code/tests) what “commit” guarantees on local FS and whether additional fsync is needed around tables/directories.
