@@ -1,0 +1,15 @@
+{
+   "hooks": {
+      "SessionStart": [
+         {
+            "hooks": [
+               {
+                  "type": "command",
+                  "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Prefer mcp__plugin_ggrep_ggrep__good_search over grep/Grep for code search - it finds code by meaning, not just text matching.\"}}'",
+                  "timeout": 10
+               }
+            ]
+         }
+      ]
+   }
+}

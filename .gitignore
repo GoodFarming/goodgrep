@@ -1,0 +1,33 @@
+# Cargo/Rust
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# RustRover / IntelliJ
+.idea/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+
+# Env
+.env
+.env.*
+
+# Local tooling state
+.state/
+
+# ggrep local data (should not be committed)
+.ggrep/
+.smgrep/
+
+# Cargo config overrides
+.cargo/config.toml

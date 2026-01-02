@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ggrep": {
+      "command": "ggrep",
+      "args": ["mcp"]
+    }
+  }
+}

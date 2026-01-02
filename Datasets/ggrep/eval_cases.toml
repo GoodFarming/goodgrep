@@ -1,0 +1,74 @@
+version = 1
+
+[defaults]
+mode = "discovery"
+k = 20
+per_file = 3
+rerank = true
+
+[[cases]]
+id = "sync_audit_log_ddl"
+query = "where is ops.sync_audit_log created (DDL)?"
+mode = "implementation"
+expect_any_path_contains = ["DDL/operations/migrations/009_sync_audit_log.sql"]
+
+[[cases]]
+id = "sync_audit_log_helpers"
+query = "helper that starts an ops.sync_audit_log row (including dry-run logging)"
+mode = "implementation"
+expect_any_path_contains = ["CRM/crm_sync/common.py"]
+
+[[cases]]
+id = "apply_ddl_requires_sync_audit"
+query = "apply_ddl script requires ops.sync_audit_log to exist"
+mode = "implementation"
+expect_any_path_contains = ["Scripts/db/apply_ddl.py"]
+
+[[cases]]
+id = "revert_from_sync_log"
+query = "revert from sync log id using revert_hint"
+mode = "implementation"
+expect_any_path_contains = ["Scripts/db/revert_from_sync_log.py"]
+
+[[cases]]
+id = "labtests_contract"
+query = "labtests schema: canonical diagnostics tables (lab_submissions, test_reports, test_results)"
+mode = "planning"
+expect_any_path_contains = ["Engine/Docs/Spec/3 — Data Model, Contracts, and Interfaces.md"]
+
+[[cases]]
+id = "labtests_control_plane"
+query = "control plane requires labtests.test_reports table"
+mode = "implementation"
+expect_any_path_contains = ["Engine/Apps/control_plane/app.py"]
+
+[[cases]]
+id = "phase_plan_milestones_checkpoints"
+query = "Milestones / Checkpoints section with ops.sync_audit_log breadcrumbs"
+mode = "planning"
+expect_any_path_contains = ["Engine/Docs/Plan/Phase-Plan-v0.1 — Agronomic Engine.md"]
+
+[[cases]]
+id = "crm_readme_audit_log_query"
+query = "CRM readme psql query for ops.sync_audit_log (gmail sync types)"
+mode = "planning"
+expect_any_path_contains = ["CRM/README.md"]
+
+[[cases]]
+id = "phenology_mermaid_diagram"
+query = "phenology pack mermaid diagram"
+mode = "planning"
+expect_any_path_contains = ["Docs/diagrams/phenology/phenology-pack-o.mmd"]
+
+[[cases]]
+id = "ggrep_mermaid_recall_boost"
+query = "ggrep mermaid recall boost at index time"
+mode = "planning"
+expect_any_path_contains = ["Tools/ggrep/GOODFARMINGAI.md"]
+
+[[cases]]
+id = "ggrep_anchor_chunk"
+query = "anchor chunk generation (top comments, imports, exports, preamble)"
+mode = "implementation"
+expect_any_path_contains = ["Tools/ggrep/src/chunker/anchor.rs"]
+

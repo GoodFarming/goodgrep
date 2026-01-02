@@ -1,0 +1,229 @@
+[package]
+name = "ggrep"
+version = "0.6.0"
+edition = "2024"
+description = "Semantic search for mixed code + docs (GoodFarmingAI fork)"
+license = "Apache-2.0"
+repository = "https://github.com/GoodFarmingAI/goodgrep"
+homepage = "https://github.com/GoodFarmingAI/goodgrep"
+documentation = "https://github.com/GoodFarmingAI/goodgrep"
+readme = "README.md"
+keywords = ["search", "semantic", "code", "grep", "embeddings"]
+categories = ["command-line-utilities", "development-tools", "text-processing"]
+authors = ["Can Bölük <me@can.ac>"]
+
+[features]
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+default = []
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# ML inference
+candle-core = "0.9.2-alpha.1"
+candle-nn = "0.9.2-alpha.1"
+candle-transformers = "0.9.2-alpha.1"
+tokenizers = "0.22"
+hf-hub = "0.4"
+
+# Vector database
+lancedb = "0.22"
+arrow-array = "56.2.0"
+arrow-schema = "56.2.0"
+arrow-arith = "56.2.0"
+arrow-buffer = "56.2.0"
+arrow-cast = "56.2.0"
+arrow-csv = "56.2.0"
+arrow-data = "56.2.0"
+arrow-ipc = "56.2.0"
+arrow-json = "56.2.0"
+arrow-ord = "56.2.0"
+arrow-pyarrow = "56.2.0"
+arrow-row = "56.2.0"
+arrow-select = "56.2.0"
+arrow-string = "56.2.0"
+chrono = "0.4.42"
+
+tree-sitter = { version = "0.25", features = ["wasm"] }
+
+# File system
+ignore = "0.4"
+notify = "8.2"
+notify-debouncer-mini = "0.7"
+walkdir = "2"
+
+# Git & Networking
+git2 = "0.20"
+reqwest = { version = "0.12", features = ["json"] }
+
+# IPC
+postcard = { version = "1", features = ["alloc"] }
+
+# Archive
+tar = "0.4"
+
+# Utilities
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+figment = { version = "0.10", features = ["toml", "env"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+parking_lot = "0.12"
+rayon = "1"
+indicatif = "0.18"
+console = "0.16"
+syntect = "5"
+directories = "6"
+once_cell = "1"
+bytes = "1"
+futures = "0.3"
+async-trait = "0.1"
+crossbeam-channel = "0.5"
+num_cpus = "1"
+hex = "0.4"
+memchr = "2"
+ndarray = "0.16"
+regex = "1"
+rustc_version_runtime = "0.3"
+is-terminal = "0.4"
+smallvec = "1.15.1"
+flume = { version = "0.11.1", features = ["async"] }
+tokio-util = { version = "0.7.17", features = ["full"] }
+moka = { version = "0.12.11", features = ["future"] }
+
+[build-dependencies]
+tar = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"
+
+[lints.clippy]
+# Enable comprehensive linting by default
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# === Axum ===
+literal_string_with_formatting_args = "allow"
+
+# === Enforce reason for all allow attributes ===
+allow_attributes_without_reason = "warn"
+
+# === Floating Point Comparisons ===
+# Tests mostly do this + we know what we're doing
+float_cmp = "allow"
+
+# === Safety ===
+undocumented_unsafe_blocks = "warn"
+cast_ptr_alignment = "allow"
+
+# === Closures and Builder Patterns ===
+# Sometimes .map(ToString::to_string) is clearer than .map(|x| x.to_string())
+redundant_closure_for_method_calls = "allow"
+# Not every function needs #[must_use], especially internal APIs
+must_use_candidate = "allow"
+# Builder pattern methods don't always need #[must_use]
+return_self_not_must_use = "allow"
+
+# === Type Inference ===
+# let _ = x; is fine without explicit type when obvious from context
+let_underscore_untyped = "allow"
+
+# === Imports ===
+# Wildcard imports can be cleaner for preludes and test modules
+wildcard_imports = "allow"
+enum_glob_use = "allow"
+
+# === Code Organization ===
+# #[inline(always)] is sometimes needed for performance-critical code
+inline_always = "allow"
+# Sometimes const/static declarations after code is more readable
+items_after_statements = "allow"
+
+# === Documentation ===
+# Documenting every possible error return is often redundant
+missing_errors_doc = "allow"
+# Not every panic condition needs documentation, especially assert! cases
+missing_panics_doc = "allow"
+
+# === Numeric Casts ===
+# These are often necessary and the alternatives are verbose
+cast_precision_loss = "allow"      # f64 as f32 - sometimes acceptable
+cast_possible_truncation = "allow" # u64 as u32 - often intentional
+cast_lossless = "allow"            # u32 as u64 - 'as' is cleaner than From
+cast_sign_loss = "allow"           # i32 as u32 - sometimes needed
+cast_possible_wrap = "allow"       # u32 as i32 - can be intentional
+
+# === Bit Operations ===
+# Explicit bit patterns can be clearer than hex literals
+verbose_bit_mask = "allow"
+
+# === Structs ===
+needless_pass_by_value = "allow"
+inconsistent_struct_constructor = "allow"
+struct_excessive_bools = "allow"          # usually with builders
+
+# === Code Style and Readability ===
+# 10_000_000 vs 0xDEADBEEF context dependent preference
+unreadable_literal = "allow"
+# Variables like 'req' and 'res' are fine together
+similar_names = "allow"
+# Default::default() is sometimes clearer than T::default()
+default_trait_access = "allow"
+# match / if let else is clearer than functional
+option_if_let_else = "allow"
+# Non Into conversion is more clear
+tuple_array_conversions = "allow"
+# Usually it is wrong, we pay a lot of attention to this already
+significant_drop_tightening = "allow"
+
+# === Pattern Matching ===
+# Sometimes _ is clearer than listing remaining variants
+match_wildcard_for_single_variants = "allow"
+# Duplicate match arms can be intentional for clarity/future changes
+match_same_arms = "allow"
+
+# === Debug Implementations ===
+# Not every field needs to be in Debug output
+missing_fields_in_debug = "allow"
+
+# === Complexity Limits ===
+# Arbitrary line limits don't account for necessary complexity
+too_many_lines = "allow"
+
+# === Unsafe Code ===
+unsafe_derive_deserialize = "allow"
+ref_as_ptr = "allow"
+borrow_as_ptr = "allow"
+ptr_as_ptr = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 8
+opt-level = 2
+strip = "none"
+debug = "line-tables-only"
+split-debuginfo = "packed"
+
+[profile.dev]
+incremental = true
+codegen-units = 256
+strip = "none"
+debug = "line-tables-only"
+
+[profile.test]
+inherits = "dev"

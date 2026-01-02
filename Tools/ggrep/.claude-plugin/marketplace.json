@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ggrep",
+  "owner": {
+    "name": "can1357",
+    "email": "me@can.ac"
+  },
+  "plugins": [
+    {
+      "name": "ggrep",
+      "source": "./plugins/ggrep",
+      "description": "Semantic code search for Claude Code. High-performance Rust implementation with automatic project indexing.",
+      "version": "0.1.0",
+      "author": {
+        "name": "can1357",
+        "email": "me@can.ac"
+      },
+      "skills": [
+        "./skills/ggrep"
+      ]
+    }
+  ]
+}

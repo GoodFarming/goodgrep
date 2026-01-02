@@ -1,0 +1,32 @@
+# Example .smignore file
+# Copy this to .smignore in your repository root to exclude files from indexing.
+# Uses the same syntax as .gitignore
+
+# Build outputs
+dist/
+build/
+out/
+
+# Dependencies (usually already in .gitignore)
+node_modules/
+vendor/
+target/
+
+# Generated/minified files
+*.min.js
+*.min.css
+*.bundle.js
+
+# Test fixtures and snapshots
+test/fixtures/
+__snapshots__/
+*.snap
+
+# Documentation that shouldn't be searched
+docs/api/
+*.generated.md
+
+# Large data files
+*.csv
+*.json.gz
+data/

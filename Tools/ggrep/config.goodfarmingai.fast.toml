@@ -1,0 +1,42 @@
+# GoodFarmingAI ggrep config (fast CPU profile)
+#
+# Goal: keep indexing + search responsive on CPU-only dev boxes while still
+# providing solid recall across a mixed corpus (code + docs + diagrams).
+
+# Dense embeddings (primary retrieval)
+dense_model = "ibm-granite/granite-embedding-small-english-r2"
+dense_dim = 384
+dense_max_length = 128
+
+# ColBERT reranking (kept configured, but fast_mode skips it)
+colbert_model = "answerdotai/answerai-colbert-small-v1"
+colbert_dim = 96
+colbert_max_length = 256
+
+# Optional embedding prefixes (leave empty unless you are tuning)
+query_prefix = ""
+doc_prefix = ""
+
+# Performance / batching
+default_batch_size = 32
+max_batch_size = 64
+sync_file_batch_size = 8
+max_threads = 32
+
+# Daemon defaults
+port = 4444
+idle_timeout_secs = 1800
+idle_check_interval_secs = 60
+worker_timeout_ms = 60000
+
+# Safety / environment
+disable_gpu = true
+fast_mode = true
+low_impact = false
+
+# Debugging
+profile_enabled = false
+skip_meta_save = false
+debug_models = false
+debug_embed = false
+

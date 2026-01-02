@@ -1,0 +1,29 @@
+%% Title: GGREP Sync + Index Lifecycle
+%% Area: ggrep
+%% Id: ggrep_sync_index_lifecycle
+flowchart LR
+  subgraph Reader[Reader / Query]
+    R0[Admission control + deadline] --> R1[Read ACTIVE_SNAPSHOT]
+    R1 --> R2[Open manifest + build SnapshotView]
+    R2 --> R3[Query snapshot segments + tombstones]
+    R3 --> R4[Rank + profile output (deterministic)]
+  end
+
+  subgraph Writer[Writer / Sync]
+    W0[Acquire writer lease + heartbeat] --> W1[Compute ChangeSet (FS-first + reconcile)]
+    W1 --> W2[Build staging txn]
+    W2 --> W3[Embed + write staging segments]
+    W3 --> W4[Integrity checks + lease epoch revalidate]
+    W4 --> W5[Write manifest.json]
+    W5 --> W6[Atomic rename ACTIVE_SNAPSHOT]
+    W6 --> W7[Release lease]
+    W7 --> W8[Cleanup staging + retention/GC]
+  end
+
+  subgraph Maintenance[Maintenance / GC + Compaction]
+    M0[Acquire writer lease] --> M1[Compute reachability]
+    M1 --> M2[Delete unreachable artifacts]
+    M2 --> M3[Publish compacted snapshot (if any)]
+  end
+
+  W6 -. readers may still see old pointer until swap .- R1

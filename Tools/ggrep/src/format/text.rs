@@ -1,0 +1,353 @@
+//! Text-based output formatters for different use cases.
+
+use std::path::Path;
+
+use console::Style;
+use syntect::{
+   easy::HighlightLines,
+   highlighting::ThemeSet,
+   parsing::SyntaxSet,
+   util::{LinesWithEndings, as_24_bit_terminal_escaped},
+};
+
+use super::{Formatter, detect_language, get_semantic_tags, truncate_line};
+use crate::types::{ChunkType, SearchResult};
+
+/// Rich TTY formatter with syntax highlighting, colors, and line numbers.
+pub struct HumanFormatter {
+   syntax_set: SyntaxSet,
+   theme_set:  ThemeSet,
+}
+
+impl Default for HumanFormatter {
+   fn default() -> Self {
+      Self::new()
+   }
+}
+
+impl HumanFormatter {
+   pub fn new() -> Self {
+      Self {
+         syntax_set: SyntaxSet::load_defaults_newlines(),
+         theme_set:  ThemeSet::load_defaults(),
+      }
+   }
+
+   fn highlight_code(&self, code: &str, language: Option<&str>) -> String {
+      let theme = &self.theme_set.themes["base16-ocean.dark"];
+
+      let syntax = language
+         .and_then(|lang| self.syntax_set.find_syntax_by_name(lang))
+         .or_else(|| Some(self.syntax_set.find_syntax_plain_text()));
+
+      if let Some(syntax) = syntax {
+         let mut highlighter = HighlightLines::new(syntax, theme);
+         let mut highlighted = String::new();
+
+         for line in LinesWithEndings::from(code) {
+            let ranges = highlighter
+               .highlight_line(line, &self.syntax_set)
+               .unwrap_or_default();
+            let escaped = as_24_bit_terminal_escaped(&ranges[..], false);
+            highlighted.push_str(&escaped);
+         }
+
+         highlighted
+      } else {
+         code.to_string()
+      }
+   }
+
+   fn merge_adjacent_results(results: &[SearchResult]) -> Vec<SearchResult> {
+      let mut results = results.to_vec();
+      if results.is_empty() {
+         return results;
+      }
+
+      results.sort_by(|a, b| a.path.cmp(&b.path).then(a.start_line.cmp(&b.start_line)));
+
+      let mut merged = Vec::new();
+      let mut current: Option<SearchResult> = None;
+
+      for result in results {
+         if let Some(ref mut curr) = current {
+            if curr.path == result.path
+               && result.start_line <= curr.start_line + curr.num_lines + 10
+            {
+               let merged = format!("{}\n// ...\n{}", curr.content, result.content);
+               curr.content = merged.into();
+               curr.num_lines = result.start_line + result.num_lines - curr.start_line;
+               if matches!(result.chunk_type, Some(ChunkType::Function | ChunkType::Class)) {
+                  curr.chunk_type = result.chunk_type;
+               }
+            } else {
+               merged.push(current.take().unwrap());
+               current = Some(result);
+            }
+         } else {
+            current = Some(result);
+         }
+      }
+
+      if let Some(last) = current {
+         merged.push(last);
+      }
+
+      merged
+   }
+}
+
+impl Formatter for HumanFormatter {
+   fn format(&self, results: &[SearchResult], show_scores: bool, show_content: bool) -> String {
+      if results.is_empty() {
+         return "No results found.".to_string();
+      }
+
+      let merged = Self::merge_adjacent_results(results);
+      let file_count = merged
+         .iter()
+         .map(|r| &r.path)
+         .collect::<std::collections::HashSet<_>>()
+         .len();
+
+      let bold = Style::new().bold();
+      let green = Style::new().green();
+      let blue = Style::new().blue();
+      let dim = Style::new().dim();
+
+      let mut output = String::new();
+      output.push('\n');
+      output.push_str(
+         &bold
+            .apply_to(format!(
+               "Search Results ({} matches across {} files)",
+               merged.len(),
+               file_count
+            ))
+            .to_string(),
+      );
+      output.push_str("\n\n");
+
+      for (idx, result) in merged.iter().enumerate() {
+         let tags = get_semantic_tags(result);
+         let tag_str = if tags.is_empty() {
+            String::new()
+         } else {
+            format!(" {}", blue.apply_to(format!("[{}]", tags.join(", "))))
+         };
+
+         let score_str = if show_scores {
+            format!(" {}", dim.apply_to(format!("(score: {:.3})", result.score)))
+         } else {
+            String::new()
+         };
+
+         use std::fmt::Write;
+         writeln!(
+            output,
+            "{}. 📂 {} {}{}{}",
+            idx + 1,
+            green.apply_to(result.path.display()),
+            dim.apply_to(format!(":{}", result.start_line + 1)),
+            tag_str,
+            score_str
+         )
+         .unwrap();
+
+         let max_lines = if show_content { usize::MAX } else { 12 };
+         let line_count = result.content.lines().count();
+         let code = if line_count > max_lines {
+            let mut s: String = result
+               .content
+               .lines()
+               .take(max_lines)
+               .collect::<Vec<_>>()
+               .join("\n");
+            use std::fmt::Write;
+            write!(s, "\n... (+{} more lines)", line_count - max_lines).unwrap();
+            s
+         } else {
+            result.content.to_string()
+         };
+         let highlighted = self.highlight_code(&code, detect_language(Path::new(&result.path)));
+
+         for (line_idx, line) in highlighted.lines().enumerate() {
+            let line_num = result.start_line + line_idx as u32 + 1;
+            use std::fmt::Write;
+            writeln!(output, "   {} │ {}", dim.apply_to(format!("{line_num:4}")), line).unwrap();
+         }
+
+         output.push('\n');
+      }
+
+      output.push_str(
+         &dim
+            .apply_to(format!("{} matches across {} files", merged.len(), file_count))
+            .to_string(),
+      );
+
+      output.trim_end().to_string()
+   }
+}
+
+/// Compact pipe-friendly formatter optimized for LLM consumption.
+///
+/// Produces clean output with minimal noise, suitable for piping to other tools
+/// or AI agents.
+pub struct AgentFormatter;
+
+impl Default for AgentFormatter {
+   fn default() -> Self {
+      Self::new()
+   }
+}
+
+impl AgentFormatter {
+   pub const fn new() -> Self {
+      Self
+   }
+
+   fn clean_snippet_lines(snippet: &str) -> Vec<String> {
+      const NOISE_PREFIXES: &[&str] =
+         &["File:", "Top comments:", "Preamble:", "(anchor)", "Imports:", "Exports:", "---"];
+
+      snippet
+         .split('\n')
+         .filter_map(|line| {
+            let trimmed_end = line.trim_end();
+            let processed = if let Some(idx) = trimmed_end.find("File:") {
+               trimmed_end[..idx].trim_end()
+            } else {
+               trimmed_end
+            };
+
+            let trimmed = processed.trim();
+            if !trimmed.is_empty() && !NOISE_PREFIXES.iter().any(|p| trimmed.starts_with(p)) {
+               Some(truncate_line(processed, 140).into_owned())
+            } else {
+               None
+            }
+         })
+         .collect()
+   }
+}
+
+impl Formatter for AgentFormatter {
+   fn format(&self, results: &[SearchResult], _show_scores: bool, show_content: bool) -> String {
+      if results.is_empty() {
+         return "No results found.".to_string();
+      }
+
+      let file_count = results
+         .iter()
+         .map(|r| &r.path)
+         .collect::<std::collections::HashSet<_>>()
+         .len();
+
+      let max_lines = if show_content { usize::MAX } else { 16 };
+      let mut output = String::new();
+
+      for result in results {
+         let line = result.start_line + 1;
+         let tags = get_semantic_tags(result);
+         let tag_str = if tags.is_empty() {
+            String::new()
+         } else {
+            format!(" [{}]", tags.join(","))
+         };
+
+         use std::fmt::Write;
+         writeln!(output, "{}:{}{}", result.path.display(), line, tag_str).unwrap();
+
+         let lines = Self::clean_snippet_lines(&result.content);
+         let display_lines = if lines.len() > max_lines {
+            let mut truncated = lines[..max_lines].to_vec();
+            truncated.push(format!("... (+{} more lines)", lines.len() - max_lines));
+            truncated
+         } else {
+            lines
+         };
+
+         for line in display_lines {
+            use std::fmt::Write;
+            writeln!(output, "  {line}").unwrap();
+         }
+
+         output.push('\n');
+      }
+
+      use std::fmt::Write;
+      write!(output, "ggrep results ({} matches across {} files)", results.len(), file_count)
+         .unwrap();
+
+      output.trim().to_string()
+   }
+}
+
+/// Minimal formatter that outputs only unique file paths.
+///
+/// Equivalent to `grep -l`, useful for listing files containing matches.
+pub struct CompactFormatter;
+
+impl Formatter for CompactFormatter {
+   fn format(&self, results: &[SearchResult], _show_scores: bool, _show_content: bool) -> String {
+      let mut unique_paths: Vec<String> = results
+         .iter()
+         .map(|r| r.path.display().to_string())
+         .collect();
+
+      unique_paths.sort();
+      unique_paths.dedup();
+      unique_paths.join("\n")
+   }
+}
+
+#[cfg(test)]
+mod tests {
+   use super::*;
+   use crate::{Str, types::ChunkType};
+
+   fn create_test_result(path: &str, start_line: u32, content: Str) -> SearchResult {
+      SearchResult {
+         path: path.into(),
+         score: 0.95,
+         start_line,
+         num_lines: content.lines().count() as u32,
+         chunk_type: Some(ChunkType::Function),
+         is_anchor: Some(false),
+         content,
+      }
+   }
+
+   #[test]
+   fn test_compact_formatter() {
+      let results = vec![
+         create_test_result("src/main.rs", 10, Str::from_static("fn main() {}")),
+         create_test_result("src/lib.rs", 5, Str::from_static("pub fn test() {}")),
+         create_test_result("src/main.rs", 20, Str::from_static("fn other() {}")),
+      ];
+
+      let formatter = CompactFormatter;
+      let output = formatter.format(&results, false, false);
+
+      assert!(output.contains("src/lib.rs"));
+      assert!(output.contains("src/main.rs"));
+      assert_eq!(output.lines().count(), 2);
+   }
+
+   #[test]
+   fn test_agent_formatter() {
+      let results = vec![create_test_result(
+         "src/auth.rs",
+         41,
+         Str::from_static("pub fn authenticate() {\n  let token = jwt::sign();\n}"),
+      )];
+
+      let formatter = AgentFormatter::new();
+      let output = formatter.format(&results, false, false);
+
+      assert!(output.contains("src/auth.rs:42"));
+      assert!(output.contains("[Definition]"));
+      assert!(output.contains("pub fn authenticate()"));
+   }
+}

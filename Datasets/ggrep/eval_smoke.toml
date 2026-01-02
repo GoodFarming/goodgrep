@@ -1,0 +1,18 @@
+version = 1
+
+[defaults]
+mode = "implementation"
+k = 15
+per_file = 3
+rerank = true
+
+[[cases]]
+id = "anchor_chunk_generation"
+query = "anchor chunk generation (top comments, imports, exports, preamble)"
+expect_any_path_contains = ["src/chunker/anchor.rs"]
+
+[[cases]]
+id = "eval_command_impl"
+query = "evaluate semantic search quality on a query suite (ggrep eval)"
+expect_any_path_contains = ["src/cmd/eval.rs"]
+
