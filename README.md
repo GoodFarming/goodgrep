@@ -1,10 +1,3 @@
-<div align="center">
-  <img src="Tools/ggrep/assets/logo.png" alt="ggrep" width="128" height="128" />
-  <h1>ggrep</h1>
-  <p><em>Semantic code search for coding agents.</em></p>
-  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
-</div>
-
 ---
 
 Natural-language search that works like `grep`. Fast, local, and built for coding agents.
