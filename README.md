@@ -1,6 +1,6 @@
 ---
 
-Natural-language search that works like `grep`. Fast, local, and built for coding agents.
+Natural-language search that works like `mgrep`. Fast, local, and built for coding agents.
 
 ## Why ggrep?
 
