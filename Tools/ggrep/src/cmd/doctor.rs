@@ -6,11 +6,12 @@
 use std::path::Path;
 
 use console::style;
-use hf_hub::{Cache, Repo, RepoType};
+use hf_hub::Cache;
 
 use crate::{
    Result, config,
    grammar::{GRAMMAR_URLS, GrammarManager},
+   models,
    util::{format_size, get_dir_size},
 };
 
@@ -37,7 +38,7 @@ pub fn execute() -> Result<()> {
    const MODEL_FILES: &[&str] = &["config.json", "tokenizer.json", "model.safetensors"];
    let cache = Cache::new(models.clone());
    for model_id in model_ids {
-      let cached_repo = cache.repo(Repo::new(model_id.to_string(), RepoType::Model));
+      let cached_repo = cache.repo(models::repo_for_model(model_id));
       let missing: Vec<&str> = MODEL_FILES
          .iter()
          .copied()

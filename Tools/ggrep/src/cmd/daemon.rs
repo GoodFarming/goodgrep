@@ -12,10 +12,11 @@ use std::{
 use tokio::time;
 
 use crate::{
-   Result,
+   Result, config,
    error::Error,
-   ipc::{Request, Response, SocketBuffer},
-   usock, version,
+   identity,
+   ipc::{self, Request, Response, SocketBuffer},
+   usock,
 };
 
 /// Timeout when establishing a Unix socket connection.
@@ -35,12 +36,15 @@ const RETRY_DELAY: Duration = Duration::from_millis(100);
 /// match, returns the connection. Otherwise spawns a new daemon and waits for
 /// it to be ready.
 pub async fn connect_matching_daemon(path: &Path, store_id: &str) -> Result<usock::Stream> {
-   if let Some(stream) = try_connect_existing(store_id).await? {
+   let index_identity = identity::resolve_index_identity(path)?;
+   let config_fingerprint = index_identity.config_fingerprint;
+
+   if let Some(stream) = try_connect_existing(store_id, &config_fingerprint).await? {
       return Ok(stream);
    }
 
    spawn_daemon(path)?;
-   wait_for_daemon(store_id).await
+   wait_for_daemon(store_id, &config_fingerprint).await
 }
 
 /// Spawns a new daemon process in the background for the given path.
@@ -62,10 +66,10 @@ pub fn spawn_daemon(path: &Path) -> Result<()> {
 
 /// Waits for a newly spawned daemon to become available and respond to
 /// handshakes.
-async fn wait_for_daemon(store_id: &str) -> Result<usock::Stream> {
+async fn wait_for_daemon(store_id: &str, config_fingerprint: &str) -> Result<usock::Stream> {
    for _ in 0..RETRY_COUNT {
       time::sleep(RETRY_DELAY).await;
-      if let Some(stream) = try_connect_existing(store_id).await? {
+      if let Some(stream) = try_connect_existing(store_id, config_fingerprint).await? {
          return Ok(stream);
       }
    }
@@ -78,7 +82,10 @@ async fn wait_for_daemon(store_id: &str) -> Result<usock::Stream> {
 
 /// Attempts to connect to an existing daemon and verify version compatibility
 /// via handshake.
-async fn try_connect_existing(store_id: &str) -> Result<Option<usock::Stream>> {
+async fn try_connect_existing(
+   store_id: &str,
+   config_fingerprint: &str,
+) -> Result<Option<usock::Stream>> {
    let stream = match time::timeout(CONNECT_TIMEOUT, usock::Stream::connect(store_id)).await {
       Ok(Ok(s)) => s,
       Ok(Err(_)) | Err(_) => return Ok(None),
@@ -86,16 +93,16 @@ async fn try_connect_existing(store_id: &str) -> Result<Option<usock::Stream>> {
 
    let mut stream = stream;
 
-   let compatible = match time::timeout(RPC_TIMEOUT, handshake(&mut stream)).await {
+   let outcome = match time::timeout(
+      RPC_TIMEOUT,
+      client_handshake(&mut stream, store_id, config_fingerprint, "ggrep-cli"),
+   )
+   .await
+   {
       Ok(Ok(v)) => v,
       Ok(Err(e)) => {
-         return Err(
-            Error::Server {
-               op:     "handshake",
-               reason: format!("daemon unresponsive during handshake: {e}"),
-            }
-            .into(),
-         );
+         tracing::debug!("handshake failed; treating as incompatible: {}", e);
+         HandshakeOutcome::Incompatible
       },
       Err(_) => {
          return Err(
@@ -108,40 +115,65 @@ async fn try_connect_existing(store_id: &str) -> Result<Option<usock::Stream>> {
       },
    };
 
-   if compatible {
-      Ok(Some(stream))
-   } else {
-      force_shutdown(Some(stream), store_id).await?;
-      Ok(None)
+   match outcome {
+      HandshakeOutcome::Compatible => Ok(Some(stream)),
+      HandshakeOutcome::Incompatible | HandshakeOutcome::InvalidRequest => {
+         force_shutdown(Some(stream), store_id).await?;
+         Ok(None)
+      },
    }
 }
 
-/// Performs a version handshake with a daemon to ensure compatibility.
-async fn handshake(stream: &mut usock::Stream) -> Result<bool> {
-   let mut buffer = SocketBuffer::new();
-   let request = Request::Hello { git_hash: version::GIT_HASH.to_string() };
-   match time::timeout(RPC_TIMEOUT, buffer.send(stream, &request)).await {
-      Ok(Ok(())) => {},
-      Ok(Err(e)) => return Err(e),
-      Err(_) => {
-         return Err(
-            Error::Server { op: "handshake", reason: "timeout sending hello".to_string() }.into(),
-         );
-      },
-   }
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum HandshakeOutcome {
+   Compatible,
+   Incompatible,
+   InvalidRequest,
+}
 
-   let response: Response = match time::timeout(RPC_TIMEOUT, buffer.recv(stream)).await {
-      Ok(Ok(r)) => r,
-      Ok(Err(e)) => return Err(e),
-      Err(_) => {
-         return Err(
-            Error::Server { op: "handshake", reason: "timeout receiving hello".to_string() }.into(),
-         );
-      },
-   };
+/// Performs a version handshake with a daemon to ensure compatibility.
+pub(crate) async fn client_handshake(
+   stream: &mut usock::Stream,
+   store_id: &str,
+   config_fingerprint: &str,
+   client_role: &str,
+) -> Result<HandshakeOutcome> {
+   let mut buffer = SocketBuffer::new();
+   let request = ipc::client_hello(
+      store_id,
+      config_fingerprint,
+      Some(ipc::default_client_id(client_role)),
+      ipc::default_client_capabilities(),
+   );
+   buffer.send(stream, &request).await?;
+   let response: Response = buffer
+      .recv_with_limit(stream, config::get().max_response_bytes)
+      .await?;
 
    match response {
-      Response::Hello { git_hash } => Ok(git_hash == version::GIT_HASH),
+      Response::Hello {
+         protocol_version,
+         protocol_versions,
+         store_id: server_store_id,
+         config_fingerprint: server_fingerprint,
+         ..
+      } => {
+         let client_versions = ipc::PROTOCOL_VERSIONS;
+         let client_supports = client_versions.contains(&protocol_version);
+         let server_supports = protocol_versions.contains(&protocol_version);
+         if !client_supports || !server_supports {
+            return Ok(HandshakeOutcome::Incompatible);
+         }
+         if server_store_id != store_id || server_fingerprint != config_fingerprint {
+            return Ok(HandshakeOutcome::InvalidRequest);
+         }
+         Ok(HandshakeOutcome::Compatible)
+      },
+      Response::Error { code, message } => match code.as_str() {
+         "incompatible" => Ok(HandshakeOutcome::Incompatible),
+         "invalid_request" => Ok(HandshakeOutcome::InvalidRequest),
+         _ => Err(Error::Server { op: "handshake", reason: format!("{code}: {message}") }.into()),
+      },
       _ => Err(Error::UnexpectedResponse("handshake").into()),
    }
 }
@@ -152,12 +184,20 @@ pub async fn force_shutdown(existing: Option<usock::Stream>, store_id: &str) -> 
 
    if let Some(mut stream) = existing {
       let _ = time::timeout(RPC_TIMEOUT, buffer.send(&mut stream, &Request::Shutdown)).await;
-      let _ = time::timeout(RPC_TIMEOUT, buffer.recv::<_, Response>(&mut stream)).await;
+      let _ = time::timeout(
+         RPC_TIMEOUT,
+         buffer.recv_with_limit::<_, Response>(&mut stream, config::get().max_response_bytes),
+      )
+      .await;
    } else if let Ok(Ok(mut stream)) =
       time::timeout(CONNECT_TIMEOUT, usock::Stream::connect(store_id)).await
    {
       let _ = time::timeout(RPC_TIMEOUT, buffer.send(&mut stream, &Request::Shutdown)).await;
-      let _ = time::timeout(RPC_TIMEOUT, buffer.recv::<_, Response>(&mut stream)).await;
+      let _ = time::timeout(
+         RPC_TIMEOUT,
+         buffer.recv_with_limit::<_, Response>(&mut stream, config::get().max_response_bytes),
+      )
+      .await;
    }
 
    // If the daemon can't be shut down cleanly, try to terminate it using the

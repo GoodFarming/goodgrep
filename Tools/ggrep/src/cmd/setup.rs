@@ -6,17 +6,23 @@
 use std::{fs, path::Path, time::Duration};
 
 use console::style;
-use hf_hub::{Cache, Repo, RepoType, api::tokio::ApiBuilder};
+use hf_hub::{Cache, api::tokio::ApiBuilder};
 use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::{
    Result, config,
+   error::ConfigError,
    grammar::{GRAMMAR_URLS, GrammarManager},
+   models,
 };
 
 /// Executes the setup command to download models and grammars.
 pub async fn execute() -> Result<()> {
    println!("{}\n", style("ggrep Setup").bold());
+
+   if config::get().offline {
+      return Err(ConfigError::DownloadsDisabled { artifact: "setup".to_string() }.into());
+   }
 
    let models = config::model_dir();
    let data = config::data_dir();
@@ -71,7 +77,8 @@ async fn download_models(models_dir: &Path) -> Result<()> {
    let api = ApiBuilder::from_cache(cache.clone()).build()?;
 
    for model_id in models {
-      let cached_repo = cache.repo(Repo::new(model_id.to_string(), RepoType::Model));
+      let repo_spec = models::repo_for_model(model_id);
+      let cached_repo = cache.repo(repo_spec.clone());
       let is_cached = MODEL_FILES.iter().all(|f| cached_repo.get(f).is_some());
 
       if is_cached {
@@ -112,7 +119,7 @@ async fn download_models(models_dir: &Path) -> Result<()> {
 
 /// Downloads tree-sitter grammar files for supported languages.
 async fn download_grammars(grammars_dir: &Path) -> Result<()> {
-   let grammar_manager = GrammarManager::with_auto_download(false)?;
+   let grammar_manager = GrammarManager::with_auto_download(true)?;
 
    for pair @ (lang, _url) in GRAMMAR_URLS {
       let grammar_path = grammars_dir.join(format!("tree-sitter-{lang}.wasm"));
@@ -155,7 +162,7 @@ async fn download_model_from_hf(
    model_id: &str,
    files_to_download: &[&str],
 ) -> Result<()> {
-   let repo = api.repo(Repo::new(model_id.to_string(), RepoType::Model));
+   let repo = api.repo(models::repo_for_model(model_id));
 
    for file in files_to_download {
       let _path = repo.get(file).await?;

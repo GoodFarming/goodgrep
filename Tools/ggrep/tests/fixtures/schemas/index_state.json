@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "store_id": "<store_id>",
+  "canonical_root": "/abs/path",
+  "config_fingerprint": "<sha256-hex>",
+  "ignore_fingerprint": "<sha256-hex>",
+  "active_snapshot_id": "01HZZ...",
+  "git": { "last_head_sha": "abc123...", "dirty": true, "untracked_included": false },
+  "last_sync_at": "2026-01-01T12:00:00Z",
+  "last_result": "ok"
+}

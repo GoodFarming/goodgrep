@@ -4,12 +4,12 @@
 # providing solid recall across a mixed corpus (code + docs + diagrams).
 
 # Dense embeddings (primary retrieval)
-dense_model = "ibm-granite/granite-embedding-small-english-r2"
+dense_model = "ibm-granite/granite-embedding-small-english-r2@c949f235cb63fcbd58b1b9e139ff63c8be764eeb"
 dense_dim = 384
 dense_max_length = 128
 
 # ColBERT reranking (kept configured, but fast_mode skips it)
-colbert_model = "answerdotai/answerai-colbert-small-v1"
+colbert_model = "answerdotai/answerai-colbert-small-v1@be1703c55532145a844da800eea4c9a692d7e267"
 colbert_dim = 96
 colbert_max_length = 256
 
@@ -33,6 +33,7 @@ worker_timeout_ms = 60000
 disable_gpu = true
 fast_mode = true
 low_impact = false
+offline = false
 
 # Debugging
 profile_enabled = false
@@ -40,3 +41,6 @@ skip_meta_save = false
 debug_models = false
 debug_embed = false
 
+# Host-wide embed limiter
+max_embed_global = 2
+embed_lock_ttl_ms = 120000

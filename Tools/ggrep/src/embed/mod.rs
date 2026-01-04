@@ -3,12 +3,15 @@
 //! Provides hybrid embedding functionality combining dense and `ColBERT` sparse
 //! vectors for improved retrieval accuracy.
 
-pub mod candle;
+pub(crate) mod candle;
+pub mod dummy;
+pub(crate) mod limiter;
 pub mod worker;
 
 use std::sync::Arc;
 
 pub use candle::CandleEmbedder;
+pub use dummy::DummyEmbedder;
 use ndarray::Array2;
 pub use worker::EmbedWorker;
 

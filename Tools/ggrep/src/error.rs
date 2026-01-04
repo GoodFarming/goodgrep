@@ -140,6 +140,40 @@ pub enum Error {
    /// Failed to open a git repository.
    #[error("failed to open repository: {0}")]
    OpenRepository(#[source] git2::Error),
+
+   /// Path collision detected after casefold normalization.
+   #[error("path collision detected (case-insensitive): {paths:?}")]
+   PathCollision { paths: Vec<String> },
+
+   /// Error already reported to the user (e.g., JSON output emitted).
+   #[error("{message}")]
+   Reported { message: String, exit_code: i32 },
+}
+
+impl Error {
+   pub fn exit_code(&self) -> i32 {
+      if let Error::Reported { exit_code, .. } = self {
+         return *exit_code;
+      }
+
+      let reason = match self {
+         Error::Server { reason, .. } => reason.to_lowercase(),
+         Error::UnexpectedResponse(op) => op.to_string().to_lowercase(),
+         other => other.to_string().to_lowercase(),
+      };
+
+      if reason.contains("busy") {
+         10
+      } else if reason.contains("timeout") {
+         11
+      } else if reason.contains("cancel") {
+         12
+      } else if reason.contains("incompatible") {
+         13
+      } else {
+         1
+      }
+   }
 }
 
 /// Errors that can occur during inter-process communication (IPC).
@@ -211,9 +245,20 @@ pub enum ConfigError {
    #[error("failed to get user directories")]
    GetUserDirectories,
 
+   /// Repo config is invalid or exceeds safety caps.
+   #[error("invalid repo config: {0}")]
+   InvalidRepoConfig(String),
+
    /// Failed to create the grammars directory for storing language grammars.
    #[error("failed to create grammars directory: {0}")]
    CreateGrammarsDir(#[source] io::Error),
+
+   /// Downloads are disabled (offline mode).
+   #[error(
+      "downloads disabled for {artifact}; run 'ggrep setup' to pre-seed caches or unset \
+       GGREP_OFFLINE"
+   )]
+   DownloadsDisabled { artifact: String },
 
    /// Failed to download a language grammar from the remote source.
    #[error("failed to download {lang}: {reason}")]

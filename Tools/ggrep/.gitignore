@@ -22,7 +22,20 @@ target/
 # macOS
 .DS_Store
 
-# smgrep local data (should not be committed)
+# ggrep/smgrep local data (should not be committed)
+.ggrep/
 .smgrep/
 
+# Cargo config overrides
 .cargo/config.toml
+
+# Editor backup files
+*~
+*.swp
+*.swo
+
+# OS-specific
+Thumbs.db
+
+# Log files
+*.log

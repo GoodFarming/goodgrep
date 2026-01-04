@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://github.com/GoodFarmingAI/goodgrep">
+  <a href="https://github.com/GoodFarming/goodgrep">
     <img src="assets/logo.png" alt="ggrep" width="128" height="128" />
   </a>
   <h1>ggrep</h1>
@@ -10,7 +10,7 @@
 Natural-language search that works like `grep`. Fast, local, and built for coding agents.
 
 - **Semantic:** Finds concepts ("where do transactions get created?"), not just strings.
-- **CPU-First:** Runs on CPU by default (Phase II hardening targets Linux+CPU).
+- **CPU-First:** Runs on CPU by default (Linux+CPU baseline).
 - **Local & Private:** 100% local embeddings. No API keys required.
 - **Auto-Isolated:** Each repository gets its own index automatically.
 - **On-Demand Grammars:** Tree-sitter WASM grammars download automatically as needed.
@@ -27,7 +27,7 @@ Natural-language search that works like `grep`. Fast, local, and built for codin
    Or build from source:
 
    ```bash
-   git clone https://github.com/GoodFarmingAI/goodgrep.git
+   git clone https://github.com/GoodFarming/goodgrep.git
    cd goodgrep/Tools/ggrep
    cargo build --release
    ```
@@ -86,46 +86,69 @@ ggrep includes a built-in MCP (Model Context Protocol) server:
 ggrep mcp
 ```
 
-This exposes a `good_search` tool that agents can use for semantic code search. The server auto-starts the background daemon if needed.
+This exposes MCP tools for agents:
+
+- `search`: semantic search (preferred; returns the same JSON schema as `ggrep search --json`)
+- `good_search`: deprecated alias of `search` (same schema as `ggrep search --json`)
+- `ggrep_status`: status JSON (same as `ggrep status --json`)
+- `ggrep_health`: health JSON (same as `ggrep health --json`)
+
+It also provides resources `ggrep://status` and `ggrep://health`. The server auto-starts the background daemon if needed.
 
 ## Commands
 
-### `ggrep [query]`
+### `ggrep "<query>"`
 
-The default command. Searches the current directory using semantic meaning.
+Shorthand. Searches the current repository using default settings.
 
 ```bash
 ggrep "how is the database connection pooled?"
 ```
 
+To control modes, output format, snippets, or re-sync, use `ggrep search` (otherwise flags are treated as part of the query string).
+
+### `ggrep search`
+
+Search indexed code semantically (mode tuning, JSON output, snippets, sync).
+
 **Options:**
 | Flag | Description | Default |
 | --- | --- | --- |
-| `-m <n>` | Max total results to return | `10` |
+| `-m`, `--max <n>` | Max total results to return | `10` |
 | `--per-file <n>` | Max matches per file | `1` |
+| `-d` | Discovery mode (favor breadth across code + docs + graphs) | `false` |
+| `-i` | Implementation mode (favor code) | `false` |
+| `-p` | Planning mode (favor docs + graphs) | `false` |
+| `-b`, `--debug` | Debug mode (favor debugging code paths) | `false` |
+| `-n`, `--no-snippet` | Show file + line only (no snippet) | `false` |
+| `-s`, `--short-snippet` | Show a short snippet preview | `false` |
+| `-l`, `--long-snippet` | Show a long snippet preview | `false` |
 | `-c`, `--content` | Show full chunk content | `false` |
 | `--compact` | Show file paths only | `false` |
 | `--scores` | Show relevance scores | `false` |
-| `-s`, `--sync` | Force re-index before search | `false` |
+| `--sync` | Force re-index before search | `false` |
 | `--dry-run` | Show what would be indexed | `false` |
+| `--allow-degraded` | Allow degraded snapshots when syncing | `false` |
 | `--json` | JSON output format | `false` |
+| `--explain` | Show explainability metadata | `false` |
 | `--no-rerank` | Skip ColBERT reranking | `false` |
+| `--eval-store` | Use the default store id with an '-eval' suffix | `false` |
 | `--plain` | Disable ANSI colors | `false` |
 
 **Examples:**
 
 ```bash
 # General concept search
-ggrep "API rate limiting logic"
+ggrep search "API rate limiting logic"
 
 # Deep dive (more matches per file)
-ggrep "error handling" --per-file 5
+ggrep search --per-file 5 "error handling"
 
 # Just the file paths
-ggrep "user validation" --compact
+ggrep search --compact "user validation"
 
 # JSON for scripting
-ggrep "config parsing" --json
+ggrep search --json "config parsing"
 ```
 
 ### `ggrep index`
@@ -188,7 +211,7 @@ ggrep doctor
 
 ## Build Profiles
 
-Phase II hardening targets Linux+CPU as the baseline.
+Linux+CPU is the baseline target.
 
 **CPU-only (default):**
 
@@ -220,6 +243,16 @@ ggrep combines several techniques for high-quality semantic search:
 
 **Supported languages (37):** TypeScript, TSX, JavaScript, Python, Go, Rust, C, C++, C#, Java, Kotlin, Scala, Ruby, PHP, Elixir, Haskell, OCaml, Julia, Zig, Lua, Odin, Objective-C, Verilog, HTML, CSS, XML, Markdown, JSON, YAML, TOML, Bash, Make, Starlark, HCL, Terraform, Diff, Regex
 
+## Specs and plans
+
+SSOT for spec/governance:
+
+- `Tools/ggrep/Docs/Spec/GGREP-Spec-Index-v0.2.md`
+
+Current-system deep dive (how snapshots/indexing/daemon work today):
+
+- `Tools/ggrep/Docs/Spec/GGREP-System-Preamble-v0.1.md`
+
 ## Configuration
 
 ggrep uses a TOML config file at `~/.ggrep/config.toml`. All options can also be set via environment variables with the `GGREP_` prefix.
@@ -235,11 +268,11 @@ ggrep uses a TOML config file at `~/.ggrep/config.toml`. All options can also be
 
 # Dense embedding model (HuggingFace model ID)
 # Used for initial semantic similarity search
-dense_model = "ibm-granite/granite-embedding-small-english-r2"
+dense_model = "ibm-granite/granite-embedding-small-english-r2@c949f235cb63fcbd58b1b9e139ff63c8be764eeb"
 
 # ColBERT reranking model (HuggingFace model ID)
 # Used for precise reranking of search results
-colbert_model = "answerdotai/answerai-colbert-small-v1"
+colbert_model = "answerdotai/answerai-colbert-small-v1@be1703c55532145a844da800eea4c9a692d7e267"
 
 # Model dimensions (must match the models above)
 dense_dim = 384
@@ -276,6 +309,40 @@ fast_mode = false
 # ============================================================================
 # Server
 # ============================================================================
+
+# Query admission (daemon)
+# Maximum concurrent queries in flight
+max_concurrent_queries = 8
+
+# Bounded queue for pending queries awaiting admission
+max_query_queue = 32
+
+# Per-client concurrency limit (when client_id is provided)
+max_concurrent_queries_per_client = 4
+
+# Per-query timeout (ms) enforced by the daemon
+query_timeout_ms = 60000
+
+# Query caps enforced by the daemon
+max_query_results = 200
+max_query_per_file = 50
+max_candidates = 2000
+max_total_snippet_bytes = 1048576
+max_snippet_bytes_per_result = 32768
+max_open_segments_per_query = 64
+max_open_segments_global = 512
+
+# Slow query threshold for observability (ms)
+slow_query_ms = 2000
+
+# IPC payload caps (bytes)
+max_request_bytes = 1048576
+max_response_bytes = 10485760
+
+# Disk budgets (0 = unlimited)
+max_store_bytes = 0
+max_cache_bytes = 0
+max_log_bytes = 0
 
 # TCP port for daemon communication
 port = 4444
@@ -356,7 +423,7 @@ test/fixtures/
 ## Building from Source
 
 ```bash
-git clone https://github.com/GoodFarmingAI/goodgrep.git
+git clone https://github.com/GoodFarming/goodgrep.git
 cd goodgrep/Tools/ggrep
 cargo build --release
 

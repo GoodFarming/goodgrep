@@ -92,3 +92,22 @@ Details here.
          .any(|c| c.content.as_str().contains("## Irrigation"))
    );
 }
+
+#[tokio::test]
+async fn test_ipc_rejects_oversize_payloads() {
+   use tokio::io::AsyncWriteExt;
+
+   let (mut client, mut server) = tokio::io::duplex(64);
+   let mut buffer = ggrep::ipc::SocketBuffer::new();
+
+   let max_len = 1024usize;
+   let oversize = (max_len + 1) as u32;
+   client.write_all(&oversize.to_le_bytes()).await.unwrap();
+
+   let err = buffer
+      .recv_with_limit::<_, ggrep::ipc::Request>(&mut server, max_len)
+      .await
+      .unwrap_err();
+
+   assert!(err.to_string().contains("message too large"));
+}

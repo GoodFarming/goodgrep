@@ -25,9 +25,26 @@ __pycache__/
 # Local tooling state
 .state/
 
+# AI agent state (Codex, Gemini, etc.)
+.codex/
+
+# Internal coordination/telemetry (not for distribution)
+Coordination/
+
 # ggrep local data (should not be committed)
 .ggrep/
 .smgrep/
 
 # Cargo config overrides
 .cargo/config.toml
+
+# Cargo mutants output
+**/mutants.out*/
+
+# Editor backup files
+*~
+*.swp
+*.swo
+
+# OS-specific
+Thumbs.db

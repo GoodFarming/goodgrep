@@ -1,0 +1,18 @@
+{
+  "schema_version": 99,
+  "request_id": "01HZZ...",
+  "store_id": "<store_id>",
+  "config_fingerprint": "<sha256-hex>",
+  "ignore_fingerprint": "<sha256-hex>",
+  "query_fingerprint": "<sha256-hex>",
+  "embed_config_fingerprint": "<sha256-hex>",
+  "snapshot_id": "01HZZ...",
+  "degraded": false,
+  "git": { "head_sha": "abc123...", "dirty": true, "untracked_included": false },
+  "mode": "planning",
+  "limits": { "max_results": 20, "per_file": 3, "snippet": "short" },
+  "limits_hit": [],
+  "warnings": [],
+  "timings_ms": { "admission": 1, "snapshot_read": 0, "retrieve": 12, "rank": 4, "format": 2 },
+  "results": []
+}

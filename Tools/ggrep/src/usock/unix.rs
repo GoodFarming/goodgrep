@@ -12,38 +12,48 @@ use tokio::{
    net::{UnixListener as TokioUnixListener, UnixStream as TokioUnixStream},
 };
 
-use super::SocketError;
-use crate::{Result, config};
+use super::{
+   SocketError, read_socket_id, remove_socket_id, socket_dirs, socket_path_for, write_socket_id,
+};
+use crate::Result;
 
 /// Returns the socket file path for a store ID
 pub fn socket_path(store_id: &str) -> PathBuf {
-   config::socket_dir().join(format!("{store_id}.sock"))
+   socket_path_for(store_id, "sock")
 }
 
 /// Lists all running servers by checking for socket files
 pub fn list_running_servers() -> Vec<String> {
-   let dir = config::socket_dir();
-   if !dir.exists() {
-      return Vec::new();
+   let mut servers = Vec::new();
+
+   for dir in socket_dirs() {
+      if !dir.exists() {
+         continue;
+      }
+      let entries = fs::read_dir(dir)
+         .into_iter()
+         .flatten()
+         .filter_map(|e| e.ok())
+         .filter(|e| e.path().extension().is_some_and(|ext| ext == "sock"))
+         .filter_map(|e| {
+            let path = e.path();
+            if let Some(id) = read_socket_id(&path.with_extension("id")) {
+               return Some(id);
+            }
+            path.file_stem().and_then(|s| s.to_str()).map(String::from)
+         });
+      servers.extend(entries);
    }
 
-   fs::read_dir(dir)
-      .into_iter()
-      .flatten()
-      .filter_map(|e| e.ok())
-      .filter(|e| e.path().extension().is_some_and(|ext| ext == "sock"))
-      .filter_map(|e| {
-         e.path()
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(String::from)
-      })
-      .collect()
+   servers.sort();
+   servers.dedup();
+   servers
 }
 
 /// Removes the socket file for a store ID
 pub fn remove_socket(store_id: &str) {
    let _ = fs::remove_file(socket_path(store_id));
+   remove_socket_id(store_id);
 }
 
 /// Unix domain socket listener
@@ -59,6 +69,11 @@ impl Listener {
 
       if let Some(parent) = path.parent() {
          fs::create_dir_all(parent).map_err(SocketError::CreateDir)?;
+         #[cfg(unix)]
+         {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+         }
       }
 
       if path.exists() {
@@ -73,6 +88,13 @@ impl Listener {
       }
 
       let inner = TokioUnixListener::bind(&path).map_err(SocketError::Bind)?;
+      #[cfg(unix)]
+      {
+         use std::os::unix::fs::PermissionsExt;
+         fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+            .map_err(SocketError::Bind)?;
+      }
+      write_socket_id(store_id);
       Ok(Self { inner, path })
    }
 
@@ -91,6 +113,8 @@ impl Listener {
 impl Drop for Listener {
    fn drop(&mut self) {
       let _ = fs::remove_file(&self.path);
+      let id_path = self.path.with_extension("id");
+      let _ = fs::remove_file(id_path);
    }
 }
 

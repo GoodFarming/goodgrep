@@ -1,0 +1,11 @@
+{
+  "schema_version": 99,
+  "owner_id": "01HZZ...",
+  "pid": 1234,
+  "hostname": "host",
+  "started_at": "2026-01-01T12:00:00Z",
+  "last_heartbeat_at": "2026-01-01T12:00:03Z",
+  "lease_epoch": 42,
+  "lease_ttl_ms": 120000,
+  "staging_txn_id": "01HZZ..."
+}

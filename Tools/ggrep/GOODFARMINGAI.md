@@ -8,19 +8,36 @@ This repo hosts `ggrep`, originally developed in GoodFarmingAI, to improve recal
 - **Markdown chunking by headings**: `.md`/`.mmd` is chunked by section headings so results return the relevant plan snippet.
 - **Mermaid recall boost (index-time)**: Mermaid diagrams are summarized into a plain-text edge/message list for embedding **without modifying the stored snippet**.
 
+## Wave II behavior notes
+
+- **Snapshot isolation:** queries pin a snapshot id and never see partial sync state.
+- **Maintenance commands:** `ggrep gc` prunes old snapshots, `ggrep compact` merges segments, `ggrep audit` checks counts.
+- **Degraded snapshots:** `ggrep index --allow-degraded` (or `ggrep serve --allow-degraded`) publishes even if some files fail to embed; status/JSON meta reports `degraded=true`.
+- **Operational budgets:** `ggrep status --json` and `ggrep health --json` surface latency/segment/disk budgets and warnings.
+
+## Runbook (status/health/audit/repair/gc)
+
+- `ggrep status --json`: quick store + daemon metadata (snapshot id, budgets, queue depth).
+- `ggrep health --json`: health gates for growth, disk budgets, and embed limiter.
+- `ggrep audit`: verify manifest counts vs vector store (use before repair).
+- `ggrep repair`: rebuild missing metadata or fail-fast with reindex required.
+- `ggrep gc`: prune stale snapshots for a repo (use `--path` for a repo; add `--force` to delete instead of dry-run).
+- `ggrep gc --stores`: list orphan stores under `~/.ggrep/data` (add `--force` to delete).
+- `ggrep compact`: merge segments and drop tombstones (run when health warns on growth).
+
 ## Install
 
 CPU-only (recommended for local dev boxes without CUDA):
 
 ```bash
-cd /home/adam/goodgrep/Tools/ggrep
+cd Tools/ggrep
 cargo +nightly install --path . --no-default-features --bin ggrep --force
 ```
 
-GoodFarmingAI fast config (CPU-friendly; avoids accidentally inheriting a large legacy config):
+Fast config (CPU-friendly; avoids accidentally inheriting a large legacy config):
 
 ```bash
-/home/adam/goodgrep/Scripts/ggrep/configure-fast.sh
+Scripts/ggrep/configure-fast.sh
 ```
 
 ### Build artifacts (disk usage)
@@ -28,8 +45,8 @@ GoodFarmingAI fast config (CPU-friendly; avoids accidentally inheriting a large 
 Rust build artifacts can get large (`Tools/ggrep/target` was >10G). Prefer a cache directory outside the repo:
 
 ```bash
-cd /home/adam/goodgrep/Tools/ggrep
-/home/adam/goodgrep/Scripts/ggrep/cargo.sh +nightly install --path . --no-default-features --bin ggrep --force
+cd Tools/ggrep
+Scripts/ggrep/cargo.sh +nightly install --path . --no-default-features --bin ggrep --force
 ```
 
 Override the location if needed:

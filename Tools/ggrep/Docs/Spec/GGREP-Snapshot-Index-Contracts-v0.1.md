@@ -1,6 +1,6 @@
 # GGREP Snapshot + Index Contracts (v0.1)
 
-Status: Draft v0.1  
+Status: Final v0.1 (SSOT)  
 Scope: `Tools/ggrep` (goodgrep repo)  
 Purpose: Lock the correctness/reliability contracts before implementing Wave II hardening.
 
@@ -194,6 +194,7 @@ Artifact caches live outside the per-store data directory and MUST be concurrenc
 - Grammars: `~/.ggrep/grammars/`
 
 Downloads MUST use per-artifact locks + download-to-temp + validation/checksum + atomic rename.
+Offline mode MUST disable downloads and rely on pre-seeded caches (e.g., `ggrep setup`).
 
 ### Atomic publish
 
@@ -240,6 +241,7 @@ Segment and tombstone references MUST include integrity metadata:
 
 Example (illustrative):
 
+<!-- schema: manifest -->
 ```json
 {
   "schema_version": 1,
@@ -310,6 +312,9 @@ For each artifact type, the binary MUST declare:
 - maximum readable `schema_version`
 - current writable `schema_version`
 
+Wave II policy: binaries MUST read N-1 (minimum readable = current-1), MUST write only N (current), and MUST
+fail fast on any future schema version (no silent downgrade).
+
 Artifact types include:
 
 - snapshot manifest
@@ -365,6 +370,8 @@ The storage engine MUST preserve snapshot isolation under concurrent multi-proce
 - Creating a new segment MUST NOT block readers of the active snapshot.
 - Readers MUST observe either the previous snapshot or the new snapshot, never partial segment state.
 - Segments MUST be immutable after publish; compaction must create new segments rather than mutating old ones.
+- If a publish would exceed `max_segments_per_snapshot` or `max_total_segments_referenced`, the writer MUST either
+  compact before publish or fail strict publish (preferred) to avoid unbounded growth.
 
 Durability barrier requirements:
 
@@ -516,6 +523,8 @@ The snapshot MUST reflect this eligible set exactly at publish time.
 - `path_key` SHOULD be normalized to Unicode NFC prior to storage and comparison.
 - If NFC normalization is not available on a platform/build, the implementation MUST still be deterministic and MUST
   surface a warning in `ggrep health` that Unicode normalization is not enforced.
+- Deferred macOS note: HFS/APFS may present decomposed NFD forms; explicit NFC normalization is deferred to a
+  future macOS-targeted release.
 
 ### Deferred: Windows path prefix normalization (informative)
 
@@ -657,6 +666,7 @@ All skips MUST be deterministic and MUST be reported via `status/health`.
 `index_state.json` is minimal and MUST be rebuildable from manifests + store.
 It MUST include both `config_fingerprint` (index) and `ignore_fingerprint` (ignore inputs).
 
+<!-- schema: index_state -->
 ```json
 {
   "schema_version": 1,
@@ -675,6 +685,7 @@ It MUST include both `config_fingerprint` (index) and `ignore_fingerprint` (igno
 
 Lease file MUST be cooperative (heartbeat-based) and MUST be safe to reclaim when stale.
 
+<!-- schema: writer_lease -->
 ```json
 {
   "schema_version": 1,
@@ -816,6 +827,10 @@ processes.
 
 Because store identity includes config fingerprints, multiple stores will accumulate over time (config evolution,
 ignore changes, pinned artifact changes). Wave II MUST provide safe lifecycle management to avoid disk churn.
+
+- Store explosion mitigation (Phase II):
+  - `ignore_fingerprint` changes SHOULD publish a new snapshot within the same store (no new store id).
+  - No segment reuse across stores in Phase II; safe store GC is the primary mitigation.
 
 - The CLI SHOULD provide a store inventory command (e.g. `ggrep stores --json`) that enumerates stores for a
   canonical root with:

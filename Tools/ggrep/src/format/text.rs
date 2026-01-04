@@ -311,6 +311,9 @@ mod tests {
       SearchResult {
          path: path.into(),
          score: 0.95,
+         secondary_score: None,
+         row_id: None,
+         segment_table: None,
          start_line,
          num_lines: content.lines().count() as u32,
          chunk_type: Some(ChunkType::Function),

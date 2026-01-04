@@ -124,7 +124,9 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
          if let Some(parent) = dst_path.parent() {
             fs::create_dir_all(parent)?;
          }
-         fs::copy(src_path, &dst_path)?;
+         if fs::hard_link(src_path, &dst_path).is_err() {
+            fs::copy(src_path, &dst_path)?;
+         }
       }
    }
 

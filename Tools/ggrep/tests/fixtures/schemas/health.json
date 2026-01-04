@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "store_id": "<store_id>",
+  "active_snapshot_id": "01HZZ...",
+  "ok": true,
+  "checks": [
+    { "code": "manifest_present", "severity": "ok", "message": "active manifest found" },
+    { "code": "segments_present", "severity": "ok", "message": "all segment refs exist" },
+    { "code": "tombstones_enforced", "severity": "ok", "message": "tombstone filter active" },
+    { "code": "casefold_collisions", "severity": "ok", "message": "no collisions detected" }
+  ]
+}

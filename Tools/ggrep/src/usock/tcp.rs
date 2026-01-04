@@ -12,16 +12,13 @@ use tokio::{
    net::{TcpListener as TokioTcpListener, TcpStream as TokioTcpStream},
 };
 
-use super::SocketError;
-use crate::{Result, config};
-
-/// Returns the directory where socket port files are stored
-pub fn socket_dir() -> PathBuf {
-   config::data_dir().join("socks")
-}
+use super::{
+   SocketError, read_socket_id, remove_socket_id, socket_dirs, socket_path_for, write_socket_id,
+};
+use crate::Result;
 
 fn port_file_path(store_id: &str) -> PathBuf {
-   socket_dir().join(format!("{}.port", store_id))
+   socket_path_for(store_id, "port")
 }
 
 /// Returns the port file path for a store ID
@@ -31,28 +28,34 @@ pub fn socket_path(store_id: &str) -> PathBuf {
 
 /// Lists all running servers by checking for port files
 pub fn list_running_servers() -> Vec<String> {
-   let dir = socket_dir();
-   if !dir.exists() {
-      return Vec::new();
+   let mut servers = Vec::new();
+   for dir in socket_dirs() {
+      if !dir.exists() {
+         continue;
+      }
+      let entries = fs::read_dir(&dir)
+         .into_iter()
+         .flatten()
+         .filter_map(|e| e.ok())
+         .filter(|e| e.path().extension().is_some_and(|ext| ext == "port"))
+         .filter_map(|e| {
+            let path = e.path();
+            if let Some(id) = read_socket_id(&path.with_extension("id")) {
+               return Some(id);
+            }
+            path.file_stem().and_then(|s| s.to_str()).map(String::from)
+         });
+      servers.extend(entries);
    }
-
-   fs::read_dir(&dir)
-      .into_iter()
-      .flatten()
-      .filter_map(|e| e.ok())
-      .filter(|e| e.path().extension().is_some_and(|ext| ext == "port"))
-      .filter_map(|e| {
-         e.path()
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(String::from)
-      })
-      .collect()
+   servers.sort();
+   servers.dedup();
+   servers
 }
 
 /// Removes the port file for a store ID
 pub fn remove_socket(store_id: &str) {
    let _ = fs::remove_file(port_file_path(store_id));
+   remove_socket_id(store_id);
 }
 
 /// TCP listener that binds to localhost and stores port in a file
@@ -85,6 +88,7 @@ impl Listener {
       let port = inner.local_addr().map_err(SocketError::Bind)?.port();
 
       fs::write(&port_file, port.to_string()).map_err(SocketError::WritePort)?;
+      write_socket_id(store_id);
 
       Ok(Self { inner, port_file, port })
    }
@@ -104,6 +108,8 @@ impl Listener {
 impl Drop for Listener {
    fn drop(&mut self) {
       let _ = fs::remove_file(&self.port_file);
+      let id_path = self.port_file.with_extension("id");
+      let _ = fs::remove_file(id_path);
    }
 }
 

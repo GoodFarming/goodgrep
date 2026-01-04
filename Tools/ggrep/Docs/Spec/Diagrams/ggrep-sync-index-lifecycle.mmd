@@ -1,6 +1,7 @@
 %% Title: GGREP Sync + Index Lifecycle
 %% Area: ggrep
 %% Id: ggrep_sync_index_lifecycle
+%% Note: Descriptive lifecycle diagram (moved from Docs/Plan to Docs/Spec/Diagrams in Phase III).
 flowchart LR
   subgraph Reader[Reader / Query]
     R0[Admission control + deadline] --> R1[Read ACTIVE_SNAPSHOT]

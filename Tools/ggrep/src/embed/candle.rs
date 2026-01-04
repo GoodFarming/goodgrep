@@ -5,11 +5,13 @@
 
 use std::{
    fmt, fs, io,
-   path::PathBuf,
+   io::Read,
+   path::{Path, PathBuf},
    sync::{
       OnceLock,
       atomic::{AtomicUsize, Ordering},
    },
+   time::Duration,
 };
 
 use candle_core::{DType, Device, Module, Tensor};
@@ -20,6 +22,7 @@ use candle_transformers::models::{
 };
 use hf_hub::{Cache, Repo, RepoType, api::tokio::ApiBuilder};
 use ndarray::Array2;
+use sha2::{Digest, Sha256};
 use tokenizers::Tokenizer;
 use tokio::sync::Mutex;
 
@@ -27,6 +30,8 @@ use crate::{
    Str, config,
    embed::{Embedder, HybridEmbedding, QueryEmbedding},
    error::Result,
+   models,
+   util::ArtifactLock,
 };
 
 const MIN_BATCH_SIZE: usize = 1;
@@ -170,6 +175,12 @@ pub enum EmbeddingError {
        models."
    )]
    DownloadModel { file: String, model: String, reason: String },
+
+   #[error(
+      "model downloads disabled (offline); missing {model}. Run 'ggrep setup' or unset \
+       GGREP_OFFLINE."
+   )]
+   DownloadsDisabled { model: String },
 
    #[error("invalid model path")]
    InvalidModelPath,
@@ -399,27 +410,66 @@ impl CandleEmbedder {
    }
 
    async fn download_model(model_id: &str) -> Result<PathBuf> {
+      let cfg = config::get();
       let cache_dir = config::model_dir().clone();
       fs::create_dir_all(&cache_dir).map_err(EmbeddingError::CreateModelCache)?;
 
+      let lock_dir = cache_dir.join("locks");
+      let lock_name = format!("model-{}.lock", Self::hash_model_id(model_id));
+      let lock_path = lock_dir.join(lock_name);
+      let _lock = ArtifactLock::acquire(&lock_path, Duration::from_secs(120)).await?;
+
       let cache = Cache::new(cache_dir);
+      let (model_name, revision) = models::split_model_id(model_id);
+      if revision.is_none() {
+         tracing::warn!(
+            "model id '{}' is not pinned to a revision; consider using '<model>@<rev>'",
+            model_id
+         );
+      }
+      let repo_spec = match revision {
+         Some(rev) => Repo::with_revision(model_name.to_string(), RepoType::Model, rev.to_string()),
+         None => Repo::new(model_name.to_string(), RepoType::Model),
+      };
+
+      let model_files = ["config.json", "tokenizer.json", "model.safetensors"];
+      let cached_repo = cache.repo(repo_spec.clone());
+
+      if cfg.offline {
+         let mut paths = Vec::new();
+         for filename in &model_files {
+            let Some(path) = cached_repo.get(filename) else {
+               return Err(
+                  EmbeddingError::DownloadsDisabled { model: model_id.to_string() }.into(),
+               );
+            };
+            if path.metadata().map(|m| m.len()).unwrap_or(0) == 0 {
+               return Err(
+                  EmbeddingError::DownloadsDisabled { model: model_id.to_string() }.into(),
+               );
+            }
+            if !verify_or_write_checksum(&path)? {
+               return Err(
+                  EmbeddingError::DownloadsDisabled { model: model_id.to_string() }.into(),
+               );
+            }
+            paths.push(path);
+         }
+         return Ok(paths[0]
+            .parent()
+            .ok_or(EmbeddingError::InvalidModelPath)?
+            .to_path_buf());
+      }
+
       let api = ApiBuilder::from_cache(cache)
          .build()
          .map_err(EmbeddingError::InitHfHub)?;
-      let repo = api.repo(Repo::new(model_id.to_string(), RepoType::Model));
+      let repo = api.repo(repo_spec);
 
-      let model_files = ["config.json", "tokenizer.json", "model.safetensors"];
       let mut paths = Vec::new();
 
       for filename in &model_files {
-         let path = repo
-            .get(filename)
-            .await
-            .map_err(|e| EmbeddingError::DownloadModel {
-               file:   filename.to_string(),
-               model:  model_id.to_string(),
-               reason: e.to_string(),
-            })?;
+         let path = download_with_checksum(&repo, filename, model_id).await?;
          paths.push(path);
       }
 
@@ -427,6 +477,12 @@ impl CandleEmbedder {
          .parent()
          .ok_or(EmbeddingError::InvalidModelPath)?
          .to_path_buf())
+   }
+
+   fn hash_model_id(model_id: &str) -> String {
+      let mut hasher = Sha256::new();
+      hasher.update(model_id.as_bytes());
+      hex::encode(hasher.finalize())
    }
 
    fn tokenize_impl(
@@ -960,6 +1016,87 @@ impl CandleEmbedder {
          .compute_dense_embeddings_batch_inner(indices, dense_tokenized)
          .await
    }
+}
+
+async fn download_with_checksum(
+   repo: &hf_hub::api::tokio::ApiRepo,
+   filename: &str,
+   model_id: &str,
+) -> Result<PathBuf> {
+   let path = repo
+      .get(filename)
+      .await
+      .map_err(|e| EmbeddingError::DownloadModel {
+         file:   filename.to_string(),
+         model:  model_id.to_string(),
+         reason: e.to_string(),
+      })?;
+
+   if path.metadata().map(|m| m.len()).unwrap_or(0) == 0 {
+      return Err(
+         EmbeddingError::DownloadModel {
+            file:   filename.to_string(),
+            model:  model_id.to_string(),
+            reason: "downloaded file is empty".to_string(),
+         }
+         .into(),
+      );
+   }
+
+   if !verify_or_write_checksum(&path)? {
+      let _ = fs::remove_file(&path);
+      let _ = fs::remove_file(checksum_path(&path));
+      let path = repo
+         .get(filename)
+         .await
+         .map_err(|e| EmbeddingError::DownloadModel {
+            file:   filename.to_string(),
+            model:  model_id.to_string(),
+            reason: e.to_string(),
+         })?;
+      if !verify_or_write_checksum(&path)? {
+         return Err(
+            EmbeddingError::DownloadModel {
+               file:   filename.to_string(),
+               model:  model_id.to_string(),
+               reason: "checksum verification failed".to_string(),
+            }
+            .into(),
+         );
+      }
+      return Ok(path);
+   }
+
+   Ok(path)
+}
+
+fn checksum_path(path: &Path) -> PathBuf {
+   path.with_extension("sha256")
+}
+
+fn verify_or_write_checksum(path: &Path) -> Result<bool> {
+   let checksum_path = checksum_path(path);
+   let actual = sha256_file(path)?;
+   if checksum_path.exists() {
+      let expected = fs::read_to_string(&checksum_path)?;
+      return Ok(expected.trim() == actual);
+   }
+   fs::write(checksum_path, actual)?;
+   Ok(true)
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+   let mut file = fs::File::open(path)?;
+   let mut hasher = Sha256::new();
+   let mut buf = [0u8; 8192];
+   loop {
+      let n = file.read(&mut buf)?;
+      if n == 0 {
+         break;
+      }
+      hasher.update(&buf[..n]);
+   }
+   Ok(hex::encode(hasher.finalize()))
 }
 
 #[async_trait::async_trait]

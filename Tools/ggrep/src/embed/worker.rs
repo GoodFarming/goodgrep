@@ -13,7 +13,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
    Str, config,
-   embed::{CandleEmbedder, Embedder, HybridEmbedding, QueryEmbedding, candle::EmbeddingError},
+   embed::{
+      DummyEmbedder, Embedder, HybridEmbedding, QueryEmbedding, candle::EmbeddingError, limiter,
+   },
    error::Result,
 };
 
@@ -31,7 +33,7 @@ pub struct EmbedWorker {
    sender:       flume::Sender<WorkerMessage>,
    cancel_token: CancellationToken,
    batch_size:   usize,
-   embedder:     Arc<CandleEmbedder>,
+   embedder:     Arc<dyn Embedder>,
 }
 
 impl EmbedWorker {
@@ -40,7 +42,11 @@ impl EmbedWorker {
       let cfg = config::get();
       let num_threads = cfg.default_threads();
       let batch_sz = cfg.batch_size();
-      let embedder = Arc::new(CandleEmbedder::new()?);
+      let embedder: Arc<dyn Embedder> = if use_dummy_embedder() {
+         Arc::new(DummyEmbedder::new(cfg.dense_dim))
+      } else {
+         Arc::new(crate::embed::CandleEmbedder::new()?)
+      };
 
       let (tx, rx) = flume::bounded(num_threads * 2);
 
@@ -88,7 +94,15 @@ impl EmbedWorker {
                // Compute the embeddings
                let embedder = embedder.clone();
                ops.push(async move {
+                  let permit = match limiter::acquire().await {
+                     Ok(permit) => permit,
+                     Err(e) => {
+                        _ = msg.tx.send(Err(e));
+                        return;
+                     },
+                  };
                   let result = embedder.compute_hybrid(&msg.chunk).await;
+                  drop(permit);
                   _ = msg.tx.send(result);
                });
             }
@@ -131,6 +145,13 @@ impl EmbedWorker {
 impl Drop for EmbedWorker {
    fn drop(&mut self) {
       self.cancel_token.cancel();
+   }
+}
+
+fn use_dummy_embedder() -> bool {
+   match std::env::var("GGREP_TEST_EMBEDDER") {
+      Ok(value) => matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"),
+      Err(_) => false,
    }
 }
 

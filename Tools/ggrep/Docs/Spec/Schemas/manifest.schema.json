@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ggrep://schemas/manifest.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "chunk_row_schema_version",
+    "snapshot_id",
+    "parent_snapshot_id",
+    "created_at",
+    "canonical_root",
+    "store_id",
+    "config_fingerprint",
+    "ignore_fingerprint",
+    "lease_epoch",
+    "git",
+    "segments",
+    "tombstones",
+    "counts",
+    "degraded",
+    "errors"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "chunk_row_schema_version": { "const": 1 },
+    "snapshot_id": { "type": "string" },
+    "parent_snapshot_id": { "type": ["string", "null"] },
+    "created_at": { "type": "string" },
+    "canonical_root": { "type": "string" },
+    "store_id": { "type": "string" },
+    "config_fingerprint": { "type": "string" },
+    "ignore_fingerprint": { "type": "string" },
+    "lease_epoch": { "type": "integer" },
+    "git": {
+      "type": "object",
+      "required": ["head_sha", "dirty", "untracked_included"],
+      "properties": {
+        "head_sha": { "type": ["string", "null"] },
+        "dirty": { "type": "boolean" },
+        "untracked_included": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ref_type", "size_bytes", "sha256"],
+        "properties": {
+          "kind": { "type": "string" },
+          "ref_type": { "type": "string" },
+          "table": { "type": "string" },
+          "path": { "type": "string" },
+          "rows": { "type": "integer" },
+          "size_bytes": { "type": "integer" },
+          "sha256": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tombstones": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ref_type", "path", "count", "size_bytes", "sha256"],
+        "properties": {
+          "ref_type": { "type": "string" },
+          "path": { "type": "string" },
+          "count": { "type": "integer" },
+          "size_bytes": { "type": "integer" },
+          "sha256": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": ["files_indexed", "chunks_indexed", "tombstones_added"],
+      "properties": {
+        "files_indexed": { "type": "integer" },
+        "chunks_indexed": { "type": "integer" },
+        "tombstones_added": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "degraded": { "type": "boolean" },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message", "path_key"],
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "path_key": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

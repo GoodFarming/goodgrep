@@ -1,0 +1,7 @@
+{
+  "protocol_versions": [2],
+  "store_id": "<store_id>",
+  "config_fingerprint": "<sha256-hex>",
+  "client_id": "agent-123",
+  "client_capabilities": ["json", "explain"]
+}

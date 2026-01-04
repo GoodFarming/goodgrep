@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "busy",
+    "message": "daemon busy",
+    "retry_after_ms": 250,
+    "snapshot_id": "01HZZ...",
+    "request_id": "01HZZ..."
+  }
+}

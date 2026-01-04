@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ggrep://schemas/handshake_response.schema.json",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "protocol_versions",
+    "binary_version",
+    "supported_schema_versions",
+    "store_id",
+    "config_fingerprint"
+  ],
+  "properties": {
+    "protocol_version": { "type": "integer" },
+    "protocol_versions": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "minItems": 1
+    },
+    "binary_version": { "type": "string" },
+    "supported_schema_versions": {
+      "type": "object",
+      "required": ["query_success", "query_error", "status", "health"],
+      "properties": {
+        "query_success": { "type": "array", "items": { "type": "integer" } },
+        "query_error": { "type": "array", "items": { "type": "integer" } },
+        "status": { "type": "array", "items": { "type": "integer" } },
+        "health": { "type": "array", "items": { "type": "integer" } }
+      },
+      "additionalProperties": false
+    },
+    "store_id": { "type": "string" },
+    "config_fingerprint": { "type": "string" }
+  },
+  "additionalProperties": false
+}

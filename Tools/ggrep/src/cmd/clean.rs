@@ -5,7 +5,7 @@
 
 use console::style;
 
-use crate::{Result, config, git};
+use crate::{Result, config, identity, reader_lock::ReaderLock};
 
 pub fn execute(store_id: Option<String>, all: bool) -> Result<()> {
    if all {
@@ -16,7 +16,7 @@ pub fn execute(store_id: Option<String>, all: bool) -> Result<()> {
       id
    } else {
       let cwd = std::env::current_dir()?;
-      git::resolve_store_id(&cwd)?
+      identity::resolve_index_identity(&cwd)?.store_id
    };
 
    clean_store(&resolved_store_id)?;
@@ -26,6 +26,7 @@ pub fn execute(store_id: Option<String>, all: bool) -> Result<()> {
 }
 
 fn clean_store(store_id: &str) -> Result<()> {
+   let _lock = ReaderLock::acquire_exclusive(store_id)?;
    // Delete metadata file
    let meta_path = config::meta_dir().join(format!("{store_id}.json"));
    if meta_path.exists() {

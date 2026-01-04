@@ -5,13 +5,16 @@
 
 use std::path::PathBuf;
 
-use crate::{Result, cmd::clone_store, git};
+use crate::{Result, cmd::clone_store, identity};
 
 pub fn execute(path: Option<PathBuf>, overwrite: bool, store_id: Option<String>) -> Result<()> {
    let root = std::env::current_dir()?;
    let store_path = path.unwrap_or(root);
 
-   let resolved = store_id.map_or_else(|| git::resolve_store_id(&store_path), Ok)?;
+   let resolved = match store_id {
+      Some(id) => id,
+      None => identity::resolve_index_identity(&store_path)?.store_id,
+   };
 
    if let Some(base) = resolved.strip_suffix("-eval") {
       return clone_store::execute(resolved.clone(), base.to_string(), overwrite);

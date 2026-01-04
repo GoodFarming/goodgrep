@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ggrep://schemas/query_success.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "request_id",
+    "store_id",
+    "config_fingerprint",
+    "ignore_fingerprint",
+    "query_fingerprint",
+    "embed_config_fingerprint",
+    "snapshot_id",
+    "degraded",
+    "git",
+    "mode",
+    "limits",
+    "results"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "request_id": { "type": "string" },
+    "store_id": { "type": "string" },
+    "config_fingerprint": { "type": "string" },
+    "ignore_fingerprint": { "type": "string" },
+    "query_fingerprint": { "type": "string" },
+    "embed_config_fingerprint": { "type": "string" },
+    "snapshot_id": { "type": ["string", "null"] },
+    "degraded": { "type": "boolean" },
+    "git": {
+      "type": ["object", "null"],
+      "properties": {
+        "head_sha": { "type": ["string", "null"] },
+        "dirty": { "type": ["boolean", "null"] },
+        "untracked_included": { "type": "boolean" }
+      },
+      "required": ["head_sha", "dirty", "untracked_included"],
+      "additionalProperties": false
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["balanced", "discovery", "implementation", "planning", "debug"]
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max_results": { "type": "integer" },
+        "per_file": { "type": "integer" },
+        "snippet": { "type": "string" }
+      },
+      "required": ["max_results", "per_file", "snippet"],
+      "additionalProperties": true
+    },
+    "limits_hit": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "limit"],
+        "properties": {
+          "code": { "type": "string" },
+          "limit": { "type": "integer" },
+          "observed": { "type": "integer" },
+          "path_key": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "path_key": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "timings_ms": {
+      "type": "object",
+      "properties": {
+        "admission": { "type": "integer" },
+        "snapshot_read": { "type": "integer" },
+        "retrieve": { "type": "integer" },
+        "rank": { "type": "integer" },
+        "format": { "type": "integer" }
+      },
+      "required": ["admission", "snapshot_read", "retrieve", "rank", "format"],
+      "additionalProperties": false
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "score", "content"],
+        "properties": {
+          "path": { "type": "string" },
+          "score": { "type": "number" },
+          "match_pct": { "type": "integer" },
+          "content": { "type": "string" },
+          "chunk_type": { "type": "string" },
+          "start_line": { "type": "integer" },
+          "end_line": { "type": "integer" },
+          "is_anchor": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "explain": { "type": "object" }
+  },
+  "additionalProperties": false
+}

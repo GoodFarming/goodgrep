@@ -1,9 +1,10 @@
-# GGREP Migration Plan (GoodFarmingAI -> goodgrep)
+# GGREP Migration Plan (Historical)
+
+> **Note**: This document records the migration of ggrep from an internal monorepo to this standalone repository. It is retained for historical context.
 
 ## Objectives
-- Move the full GGREP toolchain out of `GoodFarmingAI/Tools/ggrep` into a standalone repo at `/home/adam/goodgrep`.
+- Move the full GGREP toolchain into a standalone public repository.
 - Preserve all GGREP code, docs, plans, specs, and scripts (no functional loss).
-- Keep GoodFarmingAI usable as an indexed workspace without hosting GGREP internals (no vendored `Tools/ggrep`, `Scripts/ggrep`, or `Datasets/ggrep`).
 - Avoid large build artifacts in repo (no `target/`), keep storage stable.
 
 ## Success Criteria

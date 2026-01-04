@@ -17,11 +17,11 @@ use crate::{
    chunker::Chunker,
    embed::{Embedder, candle::CandleEmbedder},
    file::LocalFileSystem,
-   git,
+   identity,
    index_lock::IndexLock,
    meta::MetaStore,
-   store::{LanceStore, Store},
-   sync::{SyncEngine, SyncProgressCallback},
+   store::LanceStore,
+   sync::{SyncEngine, SyncOptions, SyncProgressCallback},
 };
 
 /// Executes the index command to create or update a code index.
@@ -30,13 +30,13 @@ pub async fn execute(
    dry_run: bool,
    reset: bool,
    eval_store: bool,
+   allow_degraded: bool,
    store_id: Option<String>,
 ) -> Result<()> {
    let cwd = std::env::current_dir()?.canonicalize()?;
-   let default_root = git::get_repo_root(&cwd).unwrap_or_else(|| cwd.clone());
-   let requested = path.unwrap_or(default_root).canonicalize()?;
-   let index_path = git::get_repo_root(&requested).unwrap_or(requested);
-   let index_path = index_path.canonicalize().unwrap_or(index_path);
+   let requested = path.unwrap_or(cwd).canonicalize()?;
+   let index_identity = identity::resolve_index_identity(&requested)?;
+   let index_path = index_identity.canonical_root.clone();
 
    let resolved_store_id = match store_id {
       Some(s) => {
@@ -47,7 +47,7 @@ pub async fn execute(
          }
       },
       None => {
-         let base = git::resolve_store_id(&index_path)?;
+         let base = index_identity.store_id;
          if eval_store {
             format!("{base}-eval")
          } else {
@@ -92,7 +92,7 @@ pub async fn execute(
       pb.progress(u);
       spinner.tick();
       pb.tick();
-   })
+   }, allow_degraded)
    .await?;
 
    pb.finish_with_message(format!("Indexing complete: {} files indexed", result.indexed));
@@ -107,7 +107,7 @@ pub async fn execute(
 }
 
 /// Deletes an existing store and its associated metadata.
-async fn delete_store(store_id: &str, index_path: &Path) -> Result<()> {
+async fn delete_store(store_id: &str, _index_path: &Path) -> Result<()> {
    let _lock = IndexLock::acquire(store_id)?;
 
    let store = LanceStore::new()?;
@@ -115,7 +115,7 @@ async fn delete_store(store_id: &str, index_path: &Path) -> Result<()> {
    store.delete_store(store_id).await?;
 
    let mut meta_store = MetaStore::load(store_id)?;
-   meta_store.delete_by_prefix(index_path);
+   meta_store.clear_all();
    meta_store.save()?;
 
    Ok(())
@@ -155,15 +155,23 @@ async fn index_files(
    path: &Path,
    store_id: &str,
    callback: &mut dyn SyncProgressCallback,
+   allow_degraded: bool,
 ) -> Result<IndexResult> {
    let file_system = LocalFileSystem::new();
    let embedder: Arc<dyn Embedder> = Arc::new(CandleEmbedder::new()?);
-   let store: Arc<dyn Store> = Arc::new(LanceStore::new()?);
+   let store: Arc<LanceStore> = Arc::new(LanceStore::new()?);
 
    let sync_engine = SyncEngine::new(file_system, Chunker::default(), embedder, store);
 
    let result = sync_engine
-      .initial_sync(store_id, path, false, callback)
+      .initial_sync_with_options(
+         store_id,
+         path,
+         None,
+         false,
+         SyncOptions { allow_degraded, ..SyncOptions::default() },
+         callback,
+      )
       .await?;
 
    Ok(IndexResult { indexed: result.indexed, total_chunks: result.indexed })

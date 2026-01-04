@@ -2,12 +2,14 @@
 
 pub mod discovery;
 pub mod ignore;
+pub mod path;
 pub mod watcher;
 
 use std::path::Path;
 
 pub use discovery::*;
 pub use ignore::*;
+pub use path::*;
 pub use watcher::*;
 
 /// Converts a path to a normalized string representation with forward slashes.

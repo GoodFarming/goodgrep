@@ -5,16 +5,32 @@
 use std::process::{Command, Stdio};
 
 use console::style;
+use serde::Deserialize;
 
 use crate::{Result, error::Error};
 
-fn codex_has_ggrep() -> Result<bool> {
+#[derive(Debug, Deserialize)]
+struct CodexMcpEntry {
+   transport: CodexTransport,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexTransport {
+   command: String,
+   args:    Vec<String>,
+}
+
+fn codex_get_ggrep() -> Result<Option<CodexMcpEntry>> {
    let output = Command::new("codex")
       .args(["mcp", "get", "ggrep", "--json"])
       .output()
       .map_err(Error::CodexSpawn)?;
 
-   Ok(output.status.success())
+   if !output.status.success() {
+      return Ok(None);
+   }
+
+   Ok(Some(serde_json::from_slice(&output.stdout)?))
 }
 
 fn run_codex_command(args: &[&str]) -> Result<()> {
@@ -42,13 +58,25 @@ pub fn execute() -> Result<()> {
          .bold()
    );
 
-   if codex_has_ggrep()? {
-      println!("{}", style("✓ Codex already has ggrep configured").green());
-      return Ok(());
+   let exe = std::env::current_exe()?;
+   let exe = exe.to_string_lossy().to_string();
+
+   if let Some(existing) = codex_get_ggrep()? {
+      let is_exact_match =
+         existing.transport.command == exe && existing.transport.args == vec!["mcp".to_string()];
+
+      if is_exact_match {
+         println!("{}", style("✓ Codex already has ggrep configured").green());
+         return Ok(());
+      }
+
+      println!("{}", style("Updating existing MCP server config...").dim());
+      run_codex_command(&["mcp", "remove", "ggrep"])?;
    }
 
    println!("{}", style("Registering MCP server...").dim());
-   run_codex_command(&["mcp", "add", "ggrep", "--", "ggrep", "mcp"])?;
+   let args = ["mcp", "add", "ggrep", "--", exe.as_str(), "mcp"];
+   run_codex_command(&args)?;
    println!("{}", style("✓ Added ggrep MCP server").green());
 
    println!();

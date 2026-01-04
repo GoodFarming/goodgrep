@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ggrep://schemas/query_error.schema.json",
+  "type": "object",
+  "required": ["error"],
+  "properties": {
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "retry_after_ms": { "type": "integer" },
+        "snapshot_id": { "type": "string" },
+        "request_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -5,24 +5,22 @@
 
 use std::{
    io::Write,
-   path::{Path, PathBuf},
+   path::PathBuf,
 };
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::{
-   io::{AsyncBufReadExt, BufReader},
-   time,
-};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use uuid::Uuid;
 
 use crate::{
    Result,
-   cmd::daemon,
+   cmd::{daemon, health, search, status},
+   config,
    error::Error,
-   git,
-   ipc::{Request, Response, SocketBuffer},
-   types::{SearchMode, SearchStatus},
-   usock,
+   file::{normalize_path, normalize_relative},
+   identity,
+   types::SearchMode,
 };
 
 /// Incoming JSON-RPC 2.0 request from an MCP client.
@@ -64,97 +62,9 @@ impl JsonRpcResponse {
    }
 }
 
-/// Connection to a ggrep daemon for executing searches.
-struct DaemonConn {
-   stream: usock::Stream,
-   buffer: SocketBuffer,
-}
-
-impl DaemonConn {
-   async fn connect(cwd: PathBuf) -> Result<Self> {
-      let cwd = cwd.canonicalize()?;
-      let root = git::get_repo_root(&cwd).unwrap_or_else(|| cwd.clone());
-      let store_id = git::resolve_store_id(&root)?;
-      let stream = daemon::connect_matching_daemon(&root, &store_id).await?;
-
-      Ok(Self { stream, buffer: SocketBuffer::new() })
-   }
-
-   async fn search(
-      &mut self,
-      query: &str,
-      limit: usize,
-      per_file: usize,
-      mode: SearchMode,
-      path: Option<PathBuf>,
-   ) -> Result<String> {
-      let request =
-         Request::Search { query: query.to_string(), limit, per_file, mode, path, rerank: true };
-
-      self.buffer.send(&mut self.stream, &request).await?;
-      let response: Response = self.buffer.recv(&mut self.stream).await?;
-
-      match response {
-         Response::Search(search_response) => {
-            let scores: Vec<f32> = search_response.results.iter().map(|r| r.score).collect();
-            let pcts = crate::util::compute_match_pcts(&scores);
-
-            let mut output = String::new();
-            if search_response.status == SearchStatus::Indexing {
-               let p = search_response
-                  .progress
-                  .map_or_else(|| "?".to_string(), |v| v.to_string());
-               use std::fmt::Write;
-               writeln!(output, "Status: indexing {p}% (results may be incomplete)").unwrap();
-               output.push('\n');
-            }
-            for (r, match_pct) in search_response.results.into_iter().zip(pcts.into_iter()) {
-               use std::fmt::Write;
-
-               if r.score.is_finite() {
-                  writeln!(
-                     output,
-                     "{}:{} (match: {}%, score: {:.3})",
-                     r.path.display(),
-                     r.start_line,
-                     match_pct.unwrap_or(0),
-                     r.score
-                  )
-                  .unwrap();
-               } else {
-                  writeln!(output, "{}:{}", r.path.display(), r.start_line).unwrap();
-               }
-               for line in r.content.lines().take(10) {
-                  writeln!(output, "  {line}").unwrap();
-               }
-               output.push('\n');
-            }
-            if output.is_empty() {
-               output = format!("No results found for '{query}'");
-               if search_response.status == SearchStatus::Indexing {
-                  let p = search_response
-                     .progress
-                     .map_or_else(|| "?".to_string(), |v| v.to_string());
-                  output
-                     .push_str(&format!("\n\nStatus: indexing {p}% (results may be incomplete)"));
-               }
-            }
-            Ok(output)
-         },
-         Response::Error { message } => Err(Error::Server { op: "search", reason: message }),
-         _ => Err(Error::UnexpectedResponse("search")),
-      }
-   }
-
-   async fn health(&mut self) -> Result<crate::ipc::ServerStatus> {
-      self.buffer.send(&mut self.stream, &Request::Health).await?;
-      let response: Response = self.buffer.recv(&mut self.stream).await?;
-      match response {
-         Response::Health { status } => Ok(status),
-         Response::Error { message } => Err(Error::Server { op: "health", reason: message }),
-         _ => Err(Error::UnexpectedResponse("health")),
-      }
-   }
+struct McpState {
+   startup_cwd: PathBuf,
+   workspace_root: Option<PathBuf>,
 }
 
 /// Executes the MCP server, reading JSON-RPC requests from stdin and writing
@@ -163,8 +73,8 @@ pub async fn execute() -> Result<()> {
    let stdin = BufReader::new(tokio::io::stdin());
    let mut lines = stdin.lines();
 
-   let cwd = std::env::current_dir()?;
-   let mut conn: Option<DaemonConn> = None;
+   let startup_cwd = std::env::current_dir()?;
+   let mut state = McpState { startup_cwd, workspace_root: None };
 
    while let Some(line) = lines.next_line().await? {
       if line.is_empty() {
@@ -181,7 +91,7 @@ pub async fn execute() -> Result<()> {
       };
 
       let id = request.id.clone();
-      let response = handle_request(request, &cwd, &mut conn).await;
+      let response = handle_request(request, &mut state).await;
       // JSON-RPC notifications (no `id`) must not receive a response. Some MCP
       // clients will treat responses-to-notifications as a protocol error and
       // close the transport.
@@ -212,59 +122,115 @@ fn write_response(response: &JsonRpcResponse) -> Result<()> {
 /// Handles an incoming JSON-RPC request and returns the result value.
 async fn handle_request(
    request: JsonRpcRequest,
-   cwd: &Path,
-   conn: &mut Option<DaemonConn>,
+   state: &mut McpState,
 ) -> Result<Value> {
    match request.method.as_str() {
-      "initialize" => Ok(json!({
-         "protocolVersion": "2024-11-05",
-         "capabilities": {
-            "tools": {}
-         },
-         "serverInfo": {
-            "name": "ggrep",
-            "version": env!("CARGO_PKG_VERSION")
+      "initialize" => {
+         if let Some(root) = parse_initialize_root(&request.params) {
+            state.workspace_root = root.canonicalize().ok().or(Some(root));
          }
-      })),
+
+         Ok(json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {
+               "tools": {},
+               "resources": {}
+            },
+            "serverInfo": {
+               "name": "ggrep",
+               "version": env!("CARGO_PKG_VERSION")
+            }
+         }))
+      },
 
       "notifications/initialized" | "initialized" => Ok(Value::Null),
 
-      "tools/list" => Ok(json!({
-         "tools": [{
-            "name": "good_search",
-            "description": "Semantic code search. Finds code by meaning, not just text matching. Prefer this over literal search when you don't know the exact identifier or file.",
-            "inputSchema": {
-               "type": "object",
-               "properties": {
-                  "query": {
-                     "type": "string",
-                     "description": "Natural language query describing what you're looking for"
-                  },
-                  "limit": {
-                     "type": "integer",
-                     "description": "Maximum number of results (default: 10)",
-                     "default": 10
-                  },
-                  "per_file": {
-                     "type": "integer",
-                     "description": "Maximum results per file (default: 2)",
-                     "default": 2
-                  },
-                  "mode": {
-                     "type": "string",
-                     "description": "Search mode: balanced|discovery|implementation|planning|debug (default: discovery)",
-                     "default": "discovery"
-                  },
-                  "path": {
-                     "type": "string",
-                     "description": "Optional directory scope (relative to repo root or absolute). Example: \"CRM\".",
-                     "default": ""
-                  }
+      "tools/list" => {
+         let search_input_schema = json!({
+            "type": "object",
+            "properties": {
+               "query": {
+                  "type": "string",
+                  "description": "Natural language query describing what you're looking for"
                },
-               "required": ["query"]
-            }
-         }]
-      })),
+               "limit": {
+                  "type": "integer",
+                  "description": "Maximum number of results (default: 10)",
+                  "default": 10
+               },
+               "per_file": {
+                  "type": "integer",
+                  "description": "Maximum results per file (default: 2)",
+                  "default": 2
+               },
+               "mode": {
+                  "type": "string",
+                  "description": "Search mode: balanced|discovery|implementation|planning|debug (default: discovery)",
+                  "default": "discovery"
+               },
+               "path": {
+                  "type": "string",
+                  "description": "Optional directory scope (relative to repo root or absolute). Example: \"CRM\".",
+                  "default": ""
+               },
+               "repo_root": {
+                  "type": "string",
+                  "description": "Optional repo root (absolute, or relative to workspace). Defaults to MCP workspace root (or server startup cwd).",
+                  "default": ""
+               },
+               "explain": {
+                  "type": "boolean",
+                  "description": "Include explainability metadata (candidate mix).",
+                  "default": false
+               },
+               "rerank": {
+                  "type": "boolean",
+                  "description": "Enable ColBERT reranking (default: true).",
+                  "default": true
+               }
+            },
+            "required": ["query"]
+         });
+         let search_input_schema_clone = search_input_schema.clone();
+
+         Ok(json!({
+            "tools": [{
+               "name": "search",
+               "description": "Semantic code search. Returns the same JSON schema as `ggrep search --json` (query_success/query_error).",
+               "inputSchema": search_input_schema_clone
+            }, {
+               "name": "good_search",
+               "description": "Deprecated alias of `search` (kept for backwards compatibility). Returns the same JSON schema as `ggrep search --json` (query_success/query_error).",
+               "inputSchema": search_input_schema
+            }, {
+               "name": "ggrep_status",
+               "description": "Returns `ggrep status --json` for the selected repo (or MCP workspace root).",
+               "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                     "repo_root": {
+                        "type": "string",
+                        "description": "Optional repo root (absolute, or relative to workspace). Defaults to MCP workspace root (or server startup cwd).",
+                        "default": ""
+                     }
+                  }
+               }
+            }, {
+               "name": "ggrep_health",
+               "description": "Returns `ggrep health --json` for the selected repo (or MCP workspace root).",
+               "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                     "repo_root": {
+                        "type": "string",
+                        "description": "Optional repo root (absolute, or relative to workspace). Defaults to MCP workspace root (or server startup cwd).",
+                        "default": ""
+                     }
+                  }
+               }
+            }]
+         }))
+      },
 
       "tools/call" => {
          let name = request
@@ -279,33 +245,55 @@ async fn handle_request(
             .unwrap_or_else(|| json!({}));
 
          match name {
-            "good_search" | "sem_search" => {
-               let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-               let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-               let per_file = args.get("per_file").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
-               let mode = args
-                  .get("mode")
-                  .and_then(|v| v.as_str())
-                  .and_then(|m| parse_mode(m).ok())
-                  .unwrap_or(SearchMode::Discovery);
-               let path = args
-                  .get("path")
-                  .and_then(|v| v.as_str())
-                  .map(str::trim)
-                  .filter(|s| !s.is_empty())
-                  .map(PathBuf::from);
+            "search" | "good_search" | "sem_search" => {
+               Ok(tool_good_search(state, &args).await)
+            },
+            "ggrep_status" => Ok(tool_status(state, &args).await),
+            "ggrep_health" => Ok(tool_health(state, &args).await),
+            _ => Err(Error::McpUnknownTool(name.to_string())),
+         }
+      },
 
-               let result =
-                  do_search_with_retry(cwd.to_path_buf(), conn, query, limit, per_file, mode, path)
-                     .await?;
+      "resources/list" => Ok(json!({
+         "resources": [{
+            "uri": "ggrep://status",
+            "name": "ggrep status",
+            "description": "Repository status (same schema as `ggrep status --json`).",
+            "mimeType": "application/json"
+         }, {
+            "uri": "ggrep://health",
+            "name": "ggrep health",
+            "description": "Repository health (same schema as `ggrep health --json`).",
+            "mimeType": "application/json"
+         }]
+      })),
+
+      "resources/read" => {
+         let uri = request.params.get("uri").and_then(|v| v.as_str()).unwrap_or("");
+         match uri {
+            "ggrep://status" => {
+               let base = default_repo_root(state);
+               let text = status::collect_status_json(&base, false).await?;
                Ok(json!({
-                  "content": [{
-                     "type": "text",
-                     "text": result
+                  "contents": [{
+                     "uri": uri,
+                     "mimeType": "application/json",
+                     "text": text
                   }]
                }))
             },
-            _ => Err(Error::McpUnknownTool(name.to_string())),
+            "ggrep://health" => {
+               let base = default_repo_root(state);
+               let text = health::collect_health_json(&base, false).await?;
+               Ok(json!({
+                  "contents": [{
+                     "uri": uri,
+                     "mimeType": "application/json",
+                     "text": text
+                  }]
+               }))
+            },
+            _ => Err(Error::McpUnknownMethod(format!("resources/read:{uri}"))),
          }
       },
 
@@ -313,101 +301,218 @@ async fn handle_request(
    }
 }
 
-/// Executes a search with automatic retry on connection failure.
-async fn do_search_with_retry(
-   cwd: PathBuf,
-   conn: &mut Option<DaemonConn>,
-   query: &str,
-   limit: usize,
-   per_file: usize,
-   mode: SearchMode,
-   path: Option<PathBuf>,
-) -> Result<String> {
-   let timeout = std::time::Duration::from_millis(crate::config::get().worker_timeout_ms)
-      .min(std::time::Duration::from_secs(55));
-
-   let cwd = cwd.canonicalize()?;
-   let root = git::get_repo_root(&cwd).unwrap_or_else(|| cwd.clone());
-   let scope_path = path.map(|p| if p.is_absolute() { p } else { root.join(p) });
-
-   let result = time::timeout(timeout, async {
-      let conn_ref = ensure_conn(&cwd, conn).await?;
-      conn_ref
-         .search(query, limit, per_file, mode, scope_path.clone())
-         .await
+fn tool_ok(text: String) -> Value {
+   json!({
+      "content": [{
+         "type": "text",
+         "text": text
+      }]
    })
-   .await;
+}
 
-   match result {
-      Ok(Ok(res)) => Ok(res),
-      Err(_) => {
-         // Drop the connection so a late daemon response can't desync the
-         // request/response framing on the next tool call.
-         *conn = None;
+fn tool_err(text: String) -> Value {
+   json!({
+      "content": [{
+         "type": "text",
+         "text": text
+      }],
+      "isError": true
+   })
+}
 
-         let mut status_hint = String::new();
-         if let Ok(Ok(status)) = time::timeout(std::time::Duration::from_secs(2), async {
-            let mut tmp = DaemonConn::connect(cwd.clone()).await?;
-            tmp.health().await
-         })
-         .await
-         {
-            status_hint = if status.indexing {
-               format!(" (daemon: indexing {}%, files: {})", status.progress, status.files)
-            } else {
-               format!(" (daemon: ready, files: {})", status.files)
-            };
-         }
-         Ok(format!(
-            "ggrep search timed out after {}s{status_hint}; daemon may be indexing or overloaded. \
-             Try again, or run `ggrep status`.",
-            timeout.as_secs(),
-         ))
-      },
-      Ok(Err(_)) => {
-         // Connection failure (socket closed / broken framing / daemon died).
-         // Reconnect once and retry.
-         *conn = Some(DaemonConn::connect(cwd.clone()).await?);
-         let conn_ref = ensure_conn(&cwd, conn).await?;
-         match time::timeout(timeout, conn_ref.search(query, limit, per_file, mode, scope_path))
-            .await
-         {
-            Ok(res) => res,
-            Err(_) => {
-               *conn = None;
-               let mut status_hint = String::new();
-               if let Ok(Ok(status)) = time::timeout(std::time::Duration::from_secs(2), async {
-                  let mut tmp = DaemonConn::connect(cwd.clone()).await?;
-                  tmp.health().await
-               })
-               .await
-               {
-                  status_hint = if status.indexing {
-                     format!(" (daemon: indexing {}%, files: {})", status.progress, status.files)
-                  } else {
-                     format!(" (daemon: ready, files: {})", status.files)
-                  };
-               }
-               Ok(format!(
-                  "ggrep search timed out after {}s{status_hint}; daemon may be indexing or \
-                   overloaded. Try again, or run `ggrep status`.",
-                  timeout.as_secs(),
-               ))
-            },
-         }
+async fn tool_good_search(state: &McpState, args: &Value) -> Value {
+   let request_id = Uuid::new_v4().to_string();
+   match try_tool_good_search(state, args, &request_id).await {
+      Ok(text) => tool_ok(text),
+      Err(err) => {
+         let payload = search::build_json_error(&err, request_id.as_str());
+         let text = serde_json::to_string(&payload)
+            .unwrap_or_else(|_| r#"{"error":{"code":"internal","message":"serialization failed"}}"#.to_string());
+         tool_err(text)
       },
    }
 }
 
-/// Ensures a daemon connection exists, creating one if necessary.
-async fn ensure_conn<'a>(
-   cwd: &Path,
-   conn: &'a mut Option<DaemonConn>,
-) -> Result<&'a mut DaemonConn> {
-   if conn.is_none() {
-      *conn = Some(DaemonConn::connect(cwd.to_path_buf()).await?);
+async fn try_tool_good_search(state: &McpState, args: &Value, request_id: &str) -> Result<String> {
+   let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").trim();
+   if query.is_empty() {
+      return Err(Error::Server { op: "search", reason: "invalid_request: query is required".to_string() });
    }
-   Ok(conn.as_mut().expect("connection initialized"))
+
+   let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+   let per_file = args.get("per_file").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
+   let mode = args
+      .get("mode")
+      .and_then(|v| v.as_str())
+      .and_then(|m| parse_mode(m).ok())
+      .unwrap_or(SearchMode::Discovery);
+   let rerank = args.get("rerank").and_then(|v| v.as_bool()).unwrap_or(true);
+
+   let repo_root_arg = args.get("repo_root").and_then(|v| v.as_str()).map(str::trim);
+   let base = resolve_repo_root(state, repo_root_arg)?;
+
+   let scope_arg = args.get("path").and_then(|v| v.as_str()).map(str::trim);
+   let filter_path = match scope_arg {
+      Some(scope) if !scope.is_empty() => {
+         let scope_path = PathBuf::from(scope);
+         if scope_path.is_absolute() {
+            scope_path
+         } else {
+            base.join(scope_path)
+         }
+      },
+      _ => base.clone(),
+   };
+
+   let filter_path = filter_path.canonicalize().map_err(|e| Error::Server {
+      op: "search",
+      reason: format!("invalid_request: invalid path {}: {e}", filter_path.display()),
+   })?;
+
+   let index_identity = identity::resolve_index_identity(&filter_path)?;
+   let index_root = index_identity.canonical_root.clone();
+   let store_id = index_identity.store_id.clone();
+
+   let scope_rel = if filter_path != index_root {
+      let rel = filter_path
+         .strip_prefix(&index_root)
+         .ok()
+         .and_then(normalize_relative)
+         .unwrap_or_else(|| PathBuf::from(normalize_path(&filter_path)));
+      Some(rel)
+   } else {
+      None
+   };
+
+   let cfg = config::get();
+   let capped_limit = limit.min(cfg.max_query_results).max(1);
+   let capped_per_file = per_file.min(cfg.max_query_per_file).max(1);
+
+   let stream = daemon::connect_matching_daemon(&index_root, &store_id).await?;
+   let outcome = search::send_search_request(
+      stream,
+      query,
+      capped_limit,
+      capped_per_file,
+      mode,
+      rerank,
+      scope_rel.as_deref(),
+      &index_root,
+   )
+   .await?;
+
+   let meta = search::build_meta(
+      query,
+      &index_identity,
+      &store_id,
+      scope_rel.as_deref(),
+      search::SnippetMode::Default,
+      capped_limit,
+      capped_per_file,
+      rerank,
+      mode,
+      request_id,
+      &outcome,
+   )?;
+
+   let explain = args.get("explain").and_then(|v| v.as_bool()).unwrap_or(false);
+   let explain = explain.then(|| search::build_explain(&meta, &outcome));
+
+   let payload = search::build_json_output(meta, outcome, explain);
+   Ok(serde_json::to_string(&payload)?)
+}
+
+async fn tool_status(state: &McpState, args: &Value) -> Value {
+   let repo_root_arg = args.get("repo_root").and_then(|v| v.as_str()).map(str::trim);
+   let base = match resolve_repo_root(state, repo_root_arg) {
+      Ok(p) => p,
+      Err(e) => return tool_err(e.to_string()),
+   };
+   match status::collect_status_json(&base, false).await {
+      Ok(text) => tool_ok(text),
+      Err(e) => tool_err(e.to_string()),
+   }
+}
+
+async fn tool_health(state: &McpState, args: &Value) -> Value {
+   let repo_root_arg = args.get("repo_root").and_then(|v| v.as_str()).map(str::trim);
+   let base = match resolve_repo_root(state, repo_root_arg) {
+      Ok(p) => p,
+      Err(e) => return tool_err(e.to_string()),
+   };
+   match health::collect_health_json(&base, false).await {
+      Ok(text) => tool_ok(text),
+      Err(e) => tool_err(e.to_string()),
+   }
+}
+
+fn default_repo_root(state: &McpState) -> PathBuf {
+   state
+      .workspace_root
+      .clone()
+      .unwrap_or_else(|| state.startup_cwd.clone())
+}
+
+fn resolve_repo_root(state: &McpState, repo_root: Option<&str>) -> Result<PathBuf> {
+   let base = default_repo_root(state);
+   let Some(repo_root) = repo_root else {
+      return Ok(base);
+   };
+   let repo_root = repo_root.trim();
+   if repo_root.is_empty() {
+      return Ok(base);
+   }
+   let p = PathBuf::from(repo_root);
+   Ok(if p.is_absolute() { p } else { base.join(p) })
+}
+
+fn parse_initialize_root(params: &Value) -> Option<PathBuf> {
+   if let Some(uri) = params.get("rootUri").and_then(|v| v.as_str()) {
+      if let Some(p) = decode_file_uri(uri) {
+         return Some(p);
+      }
+   }
+   let folders = params.get("workspaceFolders").and_then(|v| v.as_array())?;
+   let first = folders.first()?;
+   let uri = first.get("uri").and_then(|v| v.as_str())?;
+   decode_file_uri(uri)
+}
+
+fn decode_file_uri(uri: &str) -> Option<PathBuf> {
+   let rest = uri.strip_prefix("file://")?;
+   if rest.is_empty() {
+      return None;
+   }
+   Some(PathBuf::from(percent_decode(rest)))
+}
+
+fn percent_decode(input: &str) -> String {
+   let bytes = input.as_bytes();
+   let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+   let mut i = 0;
+   while i < bytes.len() {
+      if bytes[i] == b'%' && i + 2 < bytes.len() {
+         let hi = from_hex(bytes[i + 1]);
+         let lo = from_hex(bytes[i + 2]);
+         if let (Some(hi), Some(lo)) = (hi, lo) {
+            out.push((hi << 4) | lo);
+            i += 3;
+            continue;
+         }
+      }
+      out.push(bytes[i]);
+      i += 1;
+   }
+   String::from_utf8_lossy(&out).into_owned()
+}
+
+fn from_hex(byte: u8) -> Option<u8> {
+   match byte {
+      b'0'..=b'9' => Some(byte - b'0'),
+      b'a'..=b'f' => Some(10 + (byte - b'a')),
+      b'A'..=b'F' => Some(10 + (byte - b'A')),
+      _ => None,
+   }
 }
 
 fn parse_mode(mode: &str) -> std::result::Result<SearchMode, String> {

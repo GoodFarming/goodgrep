@@ -9,8 +9,9 @@ use std::{
 use git2::Repository;
 
 use crate::{
+   config,
    error::{Error, Result},
-   file::IgnorePatterns,
+   file::{IgnorePatterns, ResolvedPath, resolve_candidate},
    grammar::EXTENSION_MAP,
 };
 
@@ -49,13 +50,10 @@ const ADDITIONAL_EXTENSIONS: &[&str] = &[
    "mermaid",
 ];
 
-/// Maximum file size in bytes (1 MB) for files to be included in discovery.
-const MAX_FILE_SIZE: u64 = 1024 * 1024;
-
 /// Abstraction for file system operations to discover source files.
 pub trait FileSystem {
    /// Returns an iterator of all discoverable files under the given root path.
-   fn get_files(&self, root: &Path) -> Result<Box<dyn Iterator<Item = PathBuf>>>;
+   fn get_files(&self, root: &Path) -> Result<Box<dyn Iterator<Item = ResolvedPath>>>;
 }
 
 /// Local file system implementation that discovers files via git or directory
@@ -81,6 +79,7 @@ impl LocalFileSystem {
    }
 
    fn should_include_file(path: &Path, metadata: Option<&fs::Metadata>) -> bool {
+      let max_file_size = config::get().effective_max_file_size_bytes();
       if !Self::is_supported_extension(path) {
          return false;
       }
@@ -93,9 +92,9 @@ impl LocalFileSystem {
 
       // Check file size if metadata provided, otherwise check via fs
       match metadata {
-         Some(m) => m.len() <= MAX_FILE_SIZE,
+         Some(m) => m.len() <= max_file_size,
          None => fs::metadata(path)
-            .map(|m| m.len() <= MAX_FILE_SIZE)
+            .map(|m| m.len() <= max_file_size)
             .unwrap_or(true),
       }
    }
@@ -143,7 +142,7 @@ impl LocalFileSystem {
       }
 
       if let Ok(output) = Command::new("git")
-         .args(["ls-files", "--others", "--exclude-standard"])
+         .args(["ls-files", "--others", "--exclude-per-directory=.gitignore"])
          .current_dir(&repo_root_abs)
          .output()
          && output.status.success()
@@ -200,7 +199,7 @@ impl LocalFileSystem {
             } else {
                files.extend(Self::get_walkdir_files_recursive(&path, root));
             }
-         } else if file_type.is_file()
+         } else if (file_type.is_file() || file_type.is_symlink())
             && let Ok(metadata) = entry.metadata()
             && Self::should_include_file(&path, Some(&metadata))
          {
@@ -213,7 +212,7 @@ impl LocalFileSystem {
 }
 
 impl FileSystem for LocalFileSystem {
-   fn get_files(&self, root: &Path) -> Result<Box<dyn Iterator<Item = PathBuf>>> {
+   fn get_files(&self, root: &Path) -> Result<Box<dyn Iterator<Item = ResolvedPath>>> {
       let files = if Repository::discover(root).is_ok() {
          Self::get_git_files(root)?
       } else {
@@ -226,7 +225,12 @@ impl FileSystem for LocalFileSystem {
          .filter(|p| !ignore_patterns.is_ignored(p))
          .collect();
 
-      Ok(Box::new(filtered.into_iter()))
+      let resolved: Vec<ResolvedPath> = filtered
+         .into_iter()
+         .filter_map(|path| resolve_candidate(root, &path).ok().flatten())
+         .collect();
+
+      Ok(Box::new(resolved.into_iter()))
    }
 }
 

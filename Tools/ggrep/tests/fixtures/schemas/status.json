@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "store_id": "<store_id>",
+  "canonical_root": "/abs/path",
+  "config_fingerprint": "<sha256-hex>",
+  "ignore_fingerprint": "<sha256-hex>",
+  "daemon": {
+    "running": true,
+    "pid": 1234,
+    "started_at": "2026-01-01T12:00:00Z",
+    "binary_version": "0.6.0",
+    "protocol_version": 2,
+    "stale": false,
+    "supported_schema_versions": {
+      "query_success": [1],
+      "query_error": [1],
+      "status": [1],
+      "health": [1]
+    }
+  },
+  "snapshot": {
+    "active_snapshot_id": "01HZZ...",
+    "head_sha": "abc123...",
+    "dirty": true,
+    "untracked_included": false,
+    "degraded": false,
+    "created_at": "2026-01-01T12:00:00Z"
+  },
+  "sync": {
+    "state": "idle",
+    "last_sync_at": "2026-01-01T12:00:00Z",
+    "last_result": "ok",
+    "last_duration_ms": 12345,
+    "staging_txn_id": null
+  },
+  "queries": {
+    "max_concurrent": 8,
+    "max_queue_depth": 32,
+    "timeout_ms": 60000,
+    "in_flight": 2,
+    "queue_depth": 0,
+    "busy_total": 0,
+    "timeouts_total": 0,
+    "slow_total": 0
+  },
+  "resources": {
+    "embed_global": { "max_concurrent": 2, "in_use": 1, "stale_lock": false },
+    "disk": {
+      "store_bytes": 123456789,
+      "store_budget_bytes": 1073741824,
+      "cache_bytes": 12345678,
+      "cache_budget_bytes": 268435456,
+      "log_bytes": 1048576,
+      "log_budget_bytes": 10485760
+    },
+    "open_handles": {
+      "segments_open": 64,
+      "segments_budget": 512
+    }
+  },
+  "performance": {
+    "query_latency_p50_ms": 120,
+    "query_latency_p95_ms": 900,
+    "query_latency_budget_p50_ms": 300,
+    "query_latency_budget_p95_ms": 1500,
+    "segments_touched_max": 12,
+    "segments_touched_budget": 64,
+    "publish_time_last_ms": 120000,
+    "publish_time_budget_ms": 600000,
+    "gc_time_last_ms": 1500,
+    "gc_time_budget_ms": 120000,
+    "compaction_time_last_ms": 8000,
+    "compaction_time_budget_ms": 600000
+  }
+}

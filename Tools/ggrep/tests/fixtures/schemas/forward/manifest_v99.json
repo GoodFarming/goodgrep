@@ -1,0 +1,35 @@
+{
+  "schema_version": 99,
+  "chunk_row_schema_version": 1,
+  "snapshot_id": "01HZZ5X9T2K3R7G9FQ2A5V0J1M",
+  "parent_snapshot_id": "01HZZ5WQK9P6M0C2RZ0Y0X8H4S",
+  "created_at": "2026-01-01T12:00:00Z",
+  "canonical_root": "/path/to/workspace",
+  "store_id": "goodfarmingai__<root_hash>__<cfg_fp>",
+  "config_fingerprint": "<sha256-hex>",
+  "ignore_fingerprint": "<sha256-hex>",
+  "lease_epoch": 42,
+  "git": { "head_sha": "abc123...", "dirty": true, "untracked_included": false },
+  "segments": [
+    {
+      "kind": "delta",
+      "ref_type": "lancedb_table",
+      "table": "seg_01HZZ5X9T2",
+      "rows": 18234,
+      "size_bytes": 123456,
+      "sha256": "<sha256-hex>"
+    }
+  ],
+  "tombstones": [
+    {
+      "ref_type": "jsonl",
+      "path": "snapshots/01HZZ5X9T2K3R7G9FQ2A5V0J1M/tombstones.jsonl",
+      "count": 42,
+      "size_bytes": 2048,
+      "sha256": "<sha256-hex>"
+    }
+  ],
+  "counts": { "files_indexed": 1298, "chunks_indexed": 18234, "tombstones_added": 42 },
+  "degraded": false,
+  "errors": []
+}

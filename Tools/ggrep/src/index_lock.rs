@@ -3,6 +3,8 @@ use std::{
    path::PathBuf,
 };
 
+use fs4::FileExt;
+
 use crate::{Result, config};
 
 pub struct IndexLock {
@@ -24,7 +26,7 @@ impl IndexLock {
          .write(true)
          .open(&lock_path)?;
 
-      file.lock()?;
+      file.lock_exclusive()?;
 
       Ok(Self { file })
    }

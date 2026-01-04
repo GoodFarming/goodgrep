@@ -77,16 +77,20 @@ impl Chunk {
 /// Chunk prepared for embedding with file hash and identifier
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedChunk {
-   pub id:           String,
+   pub row_id:       String,
+   pub chunk_id:     String,
    #[serde(serialize_with = "crate::serde_arc_pathbuf::serialize")]
    #[serde(deserialize_with = "crate::serde_arc_pathbuf::deserialize")]
-   pub path:         Arc<PathBuf>,
-   pub hash:         FileHash,
-   pub content:      Str,
+   pub path_key:     Arc<PathBuf>,
+   pub path_key_ci:  String,
+   pub ordinal:      u32,
+   pub file_hash:    FileHash,
+   pub chunk_hash:   FileHash,
+   pub chunker:      String,
+   pub kind:         String,
+   pub text:         Str,
    pub start_line:   u32,
    pub end_line:     u32,
-   pub chunk_index:  Option<u32>,
-   pub is_anchor:    Option<bool>,
    pub chunk_type:   Option<ChunkType>,
    pub context_prev: Option<Str>,
    pub context_next: Option<Str>,
@@ -95,14 +99,18 @@ pub struct PreparedChunk {
 /// Chunk with embedding vectors ready for storage in vector database
 #[derive(Debug, Clone)]
 pub struct VectorRecord {
-   pub id:            String,
-   pub path:          Arc<PathBuf>,
-   pub hash:          FileHash,
-   pub content:       Str,
+   pub row_id:        String,
+   pub chunk_id:      String,
+   pub path_key:      Arc<PathBuf>,
+   pub path_key_ci:   String,
+   pub ordinal:       u32,
+   pub file_hash:     FileHash,
+   pub chunk_hash:    FileHash,
+   pub chunker:       String,
+   pub kind:          String,
+   pub text:          Str,
    pub start_line:    u32,
    pub end_line:      u32,
-   pub chunk_index:   Option<u32>,
-   pub is_anchor:     Option<bool>,
    pub chunk_type:    Option<ChunkType>,
    pub context_prev:  Option<Str>,
    pub context_next:  Option<Str>,
@@ -114,13 +122,104 @@ pub struct VectorRecord {
 /// Individual search result with location and relevance score
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
-   pub path:       PathBuf,
-   pub content:    Str,
-   pub score:      f32,
-   pub start_line: u32,
-   pub num_lines:  u32,
-   pub chunk_type: Option<ChunkType>,
-   pub is_anchor:  Option<bool>,
+   pub path:            PathBuf,
+   pub content:         Str,
+   pub score:           f32,
+   #[serde(skip)]
+   pub secondary_score: Option<f32>,
+   #[serde(skip)]
+   pub row_id:          Option<String>,
+   #[serde(skip)]
+   pub segment_table:   Option<String>,
+   pub start_line:      u32,
+   pub num_lines:       u32,
+   pub chunk_type:      Option<ChunkType>,
+   pub is_anchor:       Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchLimitHit {
+   pub code:     String,
+   pub limit:    u64,
+   pub observed: Option<u64>,
+   #[serde(default)]
+   pub path_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchWarning {
+   pub code:     String,
+   pub message:  String,
+   #[serde(default)]
+   pub path_key: Option<String>,
+}
+
+pub fn sort_results_deterministic(results: &mut [SearchResult]) {
+   results.sort_by(cmp_results_deterministic);
+}
+
+pub fn cmp_results_deterministic(a: &SearchResult, b: &SearchResult) -> std::cmp::Ordering {
+   const SCORE_EPSILON: f32 = 1e-6;
+
+   let score_diff = a.score - b.score;
+   if score_diff.abs() > SCORE_EPSILON {
+      return b
+         .score
+         .partial_cmp(&a.score)
+         .unwrap_or(std::cmp::Ordering::Equal);
+   }
+
+   let secondary_a = a.secondary_score.unwrap_or(0.0);
+   let secondary_b = b.secondary_score.unwrap_or(0.0);
+   let secondary_diff = secondary_a - secondary_b;
+   if secondary_diff.abs() > SCORE_EPSILON {
+      return secondary_b
+         .partial_cmp(&secondary_a)
+         .unwrap_or(std::cmp::Ordering::Equal);
+   }
+
+   let path_cmp = a.path.to_string_lossy().cmp(&b.path.to_string_lossy());
+   if path_cmp != std::cmp::Ordering::Equal {
+      return path_cmp;
+   }
+
+   let line_cmp = a.start_line.cmp(&b.start_line);
+   if line_cmp != std::cmp::Ordering::Equal {
+      return line_cmp;
+   }
+
+   let row_cmp = a
+      .row_id
+      .as_deref()
+      .unwrap_or("")
+      .cmp(b.row_id.as_deref().unwrap_or(""));
+   if row_cmp != std::cmp::Ordering::Equal {
+      return row_cmp;
+   }
+
+   a.num_lines.cmp(&b.num_lines)
+}
+
+pub fn sort_and_dedup_limits(limits: &mut Vec<SearchLimitHit>) {
+   limits.sort_by(|a, b| {
+      let code_cmp = a.code.cmp(&b.code);
+      if code_cmp != std::cmp::Ordering::Equal {
+         return code_cmp;
+      }
+      a.path_key.cmp(&b.path_key)
+   });
+   limits.dedup_by(|a, b| a.code == b.code && a.path_key == b.path_key);
+}
+
+pub fn sort_and_dedup_warnings(warnings: &mut Vec<SearchWarning>) {
+   warnings.sort_by(|a, b| {
+      let code_cmp = a.code.cmp(&b.code);
+      if code_cmp != std::cmp::Ordering::Equal {
+         return code_cmp;
+      }
+      a.path_key.cmp(&b.path_key)
+   });
+   warnings.dedup_by(|a, b| a.code == b.code && a.path_key == b.path_key);
 }
 
 /// Current indexing status of the search system
@@ -151,12 +250,27 @@ pub enum SearchMode {
    Debug,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct SearchTimings {
+   pub admission_ms:     u64,
+   pub snapshot_read_ms: u64,
+   pub retrieve_ms:      u64,
+   pub rank_ms:          u64,
+   pub format_ms:        u64,
+}
+
 /// Response from a semantic search query
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResponse {
-   pub results:  Vec<SearchResult>,
-   pub status:   SearchStatus,
-   pub progress: Option<u8>,
+   pub results:    Vec<SearchResult>,
+   pub status:     SearchStatus,
+   pub progress:   Option<u8>,
+   #[serde(default)]
+   pub timings_ms: Option<SearchTimings>,
+   #[serde(default)]
+   pub limits_hit: Vec<SearchLimitHit>,
+   #[serde(default)]
+   pub warnings:   Vec<SearchWarning>,
 }
 
 /// Metadata about a vector store instance

@@ -1,8 +1,12 @@
 # GGREP Spec Index (v0.1)
 
-Status: Draft v0.1  
+Status: Archived (Phase II SSOT; superseded by v0.2)  
 Scope: `Tools/ggrep` (goodgrep repo)  
 Purpose: Declare normative ownership and schema versions to prevent spec drift.
+
+Phase III SSOT:
+
+- `Tools/ggrep/Docs/Spec/GGREP-Spec-Index-v0.2.md`
 
 ## Phase II Scope (Execution)
 
@@ -31,16 +35,20 @@ Normative (MUST/SHOULD/MAY language is binding):
 
 Governance/Execution (normative decisions + gates):
 
-- `Tools/ggrep/Docs/Plan/GGREP-Phase-II-Hardening-Plan-v0.1.md`
-- `Tools/ggrep/Docs/Plan/GGREP-Phase-II-Implementation-Checklist-v0.1.md`
+- `Tools/ggrep/Docs/Archive/Phase-II/Plan/GGREP-Phase-II-Hardening-Plan-v0.1.md`
+- `Tools/ggrep/Docs/Archive/Phase-II/Plan/GGREP-Phase-II-Implementation-Checklist-v0.1.md`
+- `Tools/ggrep/Docs/Archive/Phase-II/Plan/GGREP-Phase-II-Test-Policy-v0.1.md`
 
 Conformance (MUST coverage map):
 
-- `Tools/ggrep/Docs/Spec/GGREP-Conformance-Map-v0.1.md`
+- `Tools/ggrep/Docs/Archive/Phase-II/Spec/GGREP-Conformance-Map-v0.1.md`
 
 Informative (external/official docs notes):
 
 - `Tools/ggrep/Docs/Research/External-Docs-Notes.md`
+- `Tools/ggrep/Docs/Research/Assumption-Tests.md`
+- `Tools/ggrep/Docs/Research/Target-Environment-Matrix.md`
+- `Tools/ggrep/Docs/Research/Embedding-Model-Policy.md`
 
 ## Artifact Schema Versions (Current)
 
@@ -59,6 +67,7 @@ Informative (external/official docs notes):
 
 - Snapshot/Index contracts use `IDX.MUST.###`.
 - Query/Daemon contracts use `IPC.MUST.###`.
+- Governance requirements use `GOV.MUST.###`.
 - IDs MUST be stable once shipped and referenced by the Conformance Map.
 
 ## Normative vs Informative
@@ -80,4 +89,5 @@ Ownership is tracked here to prevent silent divergence between docs and code.
 | Status/health/audit | `Tools/ggrep/src/status` |
 
 Module boundaries MUST be enforced with `pub(crate)` scoping and a lightweight dependency lint to prevent
-cross-layer imports (daemon depends on query engine, not snapshot internals).
+cross-layer imports (daemon depends on query engine, not snapshot internals). This requirement is tracked as
+`GOV.MUST.001`.

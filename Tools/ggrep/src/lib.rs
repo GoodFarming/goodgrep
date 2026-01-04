@@ -6,6 +6,7 @@
 
 #![feature(portable_simd)]
 
+pub mod assert;
 pub mod chunker;
 pub mod cmd;
 pub mod config;
@@ -15,12 +16,17 @@ pub mod file;
 pub mod format;
 pub mod git;
 pub mod grammar;
+pub mod identity;
 pub mod index_lock;
 pub mod ipc;
+pub mod lease;
 pub mod meta;
+pub mod models;
 pub mod preprocess;
+pub mod reader_lock;
 pub mod search;
 pub mod serde_arc_pathbuf;
+pub mod snapshot;
 mod sstr;
 pub mod store;
 pub mod sync;

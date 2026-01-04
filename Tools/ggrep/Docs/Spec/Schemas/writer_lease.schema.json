@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ggrep://schemas/writer_lease.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "owner_id",
+    "pid",
+    "hostname",
+    "started_at",
+    "last_heartbeat_at",
+    "lease_epoch",
+    "lease_ttl_ms",
+    "staging_txn_id"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "owner_id": { "type": "string" },
+    "pid": { "type": "integer" },
+    "hostname": { "type": "string" },
+    "started_at": { "type": "string" },
+    "last_heartbeat_at": { "type": "string" },
+    "lease_epoch": { "type": "integer" },
+    "lease_ttl_ms": { "type": "integer" },
+    "staging_txn_id": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

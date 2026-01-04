@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::LazyLock};
 
 use clap::{Parser, Subcommand};
 use ggrep::{
-   Result,
+   Error, Result,
    cmd::{self, search::SearchOptions},
    types::SearchMode,
    version,
@@ -111,8 +111,14 @@ enum Cmd {
       #[arg(long, help = "Show what would be indexed")]
       dry_run: bool,
 
+      #[arg(long, help = "Allow degraded snapshots when syncing")]
+      allow_degraded: bool,
+
       #[arg(long, help = "JSON output")]
       json: bool,
+
+      #[arg(long, help = "Show explainability metadata")]
+      explain: bool,
 
       #[arg(long, help = "Skip ColBERT reranking")]
       no_rerank: bool,
@@ -168,6 +174,15 @@ enum Cmd {
 
       #[arg(long, help = "Fail if mean MRR is below this threshold (0..1)")]
       fail_under_mrr: Option<f32>,
+
+      #[arg(long, help = "Baseline eval JSON for regression gating")]
+      baseline: Option<PathBuf>,
+
+      #[arg(long, help = "Allowed pass-rate drop vs baseline (0..1)")]
+      baseline_max_drop_pass_rate: Option<f32>,
+
+      #[arg(long, help = "Allowed mean MRR drop vs baseline (0..1)")]
+      baseline_max_drop_mrr: Option<f32>,
    },
 
    #[command(about = "Index a directory for semantic search")]
@@ -183,12 +198,18 @@ enum Cmd {
 
       #[arg(long, help = "Use the default store id with an '-eval' suffix")]
       eval_store: bool,
+
+      #[arg(long, help = "Allow degraded snapshots when syncing")]
+      allow_degraded: bool,
    },
 
    #[command(about = "Start a background daemon for faster searches")]
    Serve {
       #[arg(long, help = "Directory to serve (default: cwd)")]
       path: Option<PathBuf>,
+
+      #[arg(long, help = "Allow degraded snapshots when syncing")]
+      allow_degraded: bool,
    },
 
    #[command(about = "Stop the daemon for a directory")]
@@ -201,7 +222,49 @@ enum Cmd {
    StopAll,
 
    #[command(about = "Show status of running daemons")]
-   Status,
+   Status {
+      #[arg(long, help = "JSON output")]
+      json: bool,
+   },
+
+   #[command(about = "Run health checks and report status")]
+   Health {
+      #[arg(long, help = "JSON output")]
+      json: bool,
+   },
+
+   #[command(about = "Audit snapshot counts for drift")]
+   Audit {
+      #[arg(short = 'p', long, help = "Directory to audit (default: cwd)")]
+      path: Option<PathBuf>,
+
+      #[arg(long, help = "JSON output")]
+      json: bool,
+   },
+
+   #[command(about = "Compact index segments and prune tombstones")]
+   Compact {
+      #[arg(short = 'p', long, help = "Directory to compact (default: cwd)")]
+      path: Option<PathBuf>,
+
+      #[arg(long, help = "Force compaction even if thresholds not exceeded")]
+      force: bool,
+
+      #[arg(long, help = "JSON output")]
+      json: bool,
+   },
+
+   #[command(name = "upgrade-store", about = "Upgrade store format (placeholder)")]
+   UpgradeStore {
+      #[arg(short = 'p', long, help = "Directory to upgrade (default: cwd)")]
+      path: Option<PathBuf>,
+   },
+
+   #[command(about = "Repair missing segments using snapshot mapping")]
+   Repair {
+      #[arg(short = 'p', long, help = "Directory to repair (default: cwd)")]
+      path: Option<PathBuf>,
+   },
 
    #[command(about = "Remove index data and metadata for a store")]
    Clean {
@@ -233,14 +296,38 @@ enum Cmd {
       overwrite: bool,
    },
 
+   #[command(about = "Garbage-collect stores and artifacts")]
+   Gc {
+      #[arg(short = 'p', long, help = "Directory to GC (default: cwd)")]
+      path: Option<PathBuf>,
+
+      #[arg(long, help = "GC orphaned stores under ~/.ggrep/data")]
+      stores: bool,
+
+      #[arg(long, help = "Delete instead of dry-run")]
+      force: bool,
+
+      #[arg(long, help = "JSON output")]
+      json: bool,
+   },
+
    #[command(about = "Download and configure embedding models")]
    Setup,
 
    #[command(about = "Check system configuration and dependencies")]
    Doctor,
 
-   #[command(about = "List indexed files in a directory")]
-   List,
+   #[command(about = "List available stores")]
+   List {
+      #[arg(long, help = "JSON output")]
+      json: bool,
+   },
+
+   #[command(about = "List all stores")]
+   Stores {
+      #[arg(long, help = "JSON output")]
+      json: bool,
+   },
 
    #[command(name = "claude-install", about = "Install ggrep as a Claude Code MCP server")]
    ClaudeInstall,
@@ -259,13 +346,21 @@ enum Cmd {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
    tracing_subscriber::fmt()
       .with_env_filter(EnvFilter::from_default_env().add_directive(Level::WARN.into()))
       .init();
 
    let cli = Cli::parse();
+   if let Err(err) = run(cli).await {
+      if !matches!(err, Error::Reported { .. }) {
+         eprintln!("{err}");
+      }
+      std::process::exit(err.exit_code());
+   }
+}
 
+async fn run(cli: Cli) -> Result<()> {
    if cli.command.is_none() && !cli.query.is_empty() {
       let query = cli.query.join(" ");
       return cmd::search::execute(query, None, 10, 1, SearchOptions::default(), false, cli.store)
@@ -290,7 +385,9 @@ async fn main() -> Result<()> {
          scores,
          sync,
          dry_run,
+         allow_degraded,
          json,
+         explain,
          no_rerank,
          eval_store,
          plain,
@@ -309,7 +406,9 @@ async fn main() -> Result<()> {
                scores,
                sync,
                dry_run,
+               allow_degraded,
                json,
+               explain,
                no_rerank,
                plain,
                mode: if discovery {
@@ -343,6 +442,9 @@ async fn main() -> Result<()> {
          eval_store,
          fail_under_pass_rate,
          fail_under_mrr,
+         baseline,
+         baseline_max_drop_pass_rate,
+         baseline_max_drop_mrr,
       }) => {
          cmd::eval::execute(
             cases,
@@ -358,17 +460,29 @@ async fn main() -> Result<()> {
             eval_store,
             fail_under_pass_rate,
             fail_under_mrr,
+            baseline,
+            baseline_max_drop_pass_rate,
+            baseline_max_drop_mrr,
             cli.store,
          )
          .await
       },
-      Some(Cmd::Index { path, dry_run, reset, eval_store }) => {
-         cmd::index::execute(path, dry_run, reset, eval_store, cli.store).await
+      Some(Cmd::Index { path, dry_run, reset, eval_store, allow_degraded }) => {
+         cmd::index::execute(path, dry_run, reset, eval_store, allow_degraded, cli.store).await
       },
-      Some(Cmd::Serve { path }) => cmd::serve::execute(path, cli.store).await,
+      Some(Cmd::Serve { path, allow_degraded }) => {
+         cmd::serve::execute(path, cli.store, allow_degraded).await
+      },
       Some(Cmd::Stop { path }) => cmd::stop::execute(path).await,
       Some(Cmd::StopAll) => cmd::stop_all::execute().await,
-      Some(Cmd::Status) => cmd::status::execute().await,
+      Some(Cmd::Status { json }) => cmd::status::execute(json).await,
+      Some(Cmd::Health { json }) => cmd::health::execute(json).await,
+      Some(Cmd::Audit { path, json }) => cmd::audit::execute(path, json, cli.store).await,
+      Some(Cmd::Compact { path, force, json }) => {
+         cmd::compact::execute(path, force, json, cli.store).await
+      }
+      Some(Cmd::UpgradeStore { path }) => cmd::upgrade_store::execute(path, cli.store),
+      Some(Cmd::Repair { path }) => cmd::repair::execute(path, cli.store).await,
       Some(Cmd::Clean { store_id, all }) => cmd::clean::execute(store_id, all),
       Some(Cmd::CloneStore { from, to, overwrite }) => {
          cmd::clone_store::execute(from, to, overwrite)
@@ -376,17 +490,20 @@ async fn main() -> Result<()> {
       Some(Cmd::PromoteEval { path, overwrite }) => {
          cmd::promote_eval::execute(path, overwrite, cli.store)
       },
+      Some(Cmd::Gc { path, stores, force, json }) => {
+         cmd::gc::execute(stores, force, json, path, cli.store).await
+      }
       Some(Cmd::Setup) => cmd::setup::execute().await,
       Some(Cmd::Doctor) => cmd::doctor::execute(),
-      Some(Cmd::List) => cmd::list::execute(),
+      Some(Cmd::List { json }) => cmd::list::execute(json),
+      Some(Cmd::Stores { json }) => cmd::list::execute(json),
       Some(Cmd::ClaudeInstall) => cmd::claude_install::execute(),
       Some(Cmd::CodexInstall) => cmd::codex_install::execute(),
       Some(Cmd::GeminiInstall) => cmd::gemini_install::execute(),
       Some(Cmd::OpencodeInstall) => cmd::opencode_install::execute(),
       Some(Cmd::Mcp) => cmd::mcp::execute().await,
       None => {
-         eprintln!("No command or query provided. Use --help for usage information.");
-         std::process::exit(1);
+         Err(Error::Server { op: "cli", reason: "no command or query provided".to_string() }.into())
       },
    }
 }

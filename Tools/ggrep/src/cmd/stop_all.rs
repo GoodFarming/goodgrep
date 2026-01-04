@@ -9,7 +9,10 @@ use tokio::time;
 
 use crate::{
    Result,
+   cmd::daemon::{HandshakeOutcome, client_handshake},
+   config,
    ipc::{self, Request, Response},
+   meta::MetaStore,
    usock,
 };
 
@@ -68,6 +71,25 @@ pub async fn execute() -> Result<()> {
 
       if let Some(mut stream) = stream {
          let mut buffer = ipc::SocketBuffer::new();
+
+         let config_fingerprint = MetaStore::load(&store_id)
+            .ok()
+            .and_then(|meta| meta.config_fingerprint().map(|s| s.to_string()))
+            .unwrap_or_default();
+
+         let handshake = time::timeout(
+            RPC_TIMEOUT,
+            client_handshake(&mut stream, &store_id, &config_fingerprint, "ggrep-stop-all"),
+         )
+         .await;
+         if !matches!(handshake, Ok(Ok(HandshakeOutcome::Compatible))) {
+            _ = force_kill_if_possible(&store_id);
+            usock::remove_socket(&store_id);
+            usock::remove_pid(&store_id);
+            stopped += 1;
+            continue;
+         }
+
          let sent = time::timeout(RPC_TIMEOUT, buffer.send(&mut stream, &Request::Shutdown)).await;
          if !matches!(sent, Ok(Ok(()))) {
             _ = force_kill_if_possible(&store_id);
@@ -77,7 +99,12 @@ pub async fn execute() -> Result<()> {
             continue;
          }
 
-         match time::timeout(RPC_TIMEOUT, buffer.recv::<_, Response>(&mut stream)).await {
+         match time::timeout(
+            RPC_TIMEOUT,
+            buffer.recv_with_limit(&mut stream, config::get().max_response_bytes),
+         )
+         .await
+         {
             Ok(Ok(Response::Shutdown { success: true })) => stopped += 1,
             Ok(Ok(_)) => failed += 1,
             Ok(Err(_)) | Err(_) => {

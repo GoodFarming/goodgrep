@@ -49,13 +49,17 @@ pub fn execute() -> Result<()> {
          .bold()
    );
 
+   let exe = std::env::current_exe()?;
+   let exe = exe.to_string_lossy().to_string();
+
    if gemini_has_ggrep()? {
       println!("{}", style("✓ Gemini already has ggrep configured").green());
       return Ok(());
    }
 
    println!("{}", style("Registering MCP server...").dim());
-   run_gemini_command(&["mcp", "add", "ggrep", "ggrep", "mcp"])?;
+   let args = ["mcp", "add", "ggrep", exe.as_str(), "mcp"];
+   run_gemini_command(&args)?;
    println!("{}", style("✓ Added ggrep MCP server").green());
 
    println!();

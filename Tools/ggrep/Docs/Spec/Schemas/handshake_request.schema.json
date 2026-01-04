@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ggrep://schemas/handshake_request.schema.json",
+  "type": "object",
+  "properties": {
+    "protocol_versions": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "minItems": 1
+    },
+    "protocol_version": { "type": "integer" },
+    "store_id": { "type": "string" },
+    "config_fingerprint": { "type": "string" },
+    "client_id": { "type": "string" },
+    "client_capabilities": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "oneOf": [
+    { "required": ["protocol_versions"] },
+    { "required": ["protocol_version"] }
+  ],
+  "required": ["store_id", "config_fingerprint"],
+  "additionalProperties": false
+}

@@ -77,6 +77,9 @@ pub fn execute() -> Result<()> {
          .bold()
    );
 
+   let exe = std::env::current_exe()?;
+   let exe = exe.to_string_lossy().to_string();
+
    let config_path = opencode_config_path()?;
    println!("Config: {}", style(config_path.display()).dim());
 
@@ -85,7 +88,7 @@ pub fn execute() -> Result<()> {
 
    let entry = json!({
       "type": "local",
-      "command": ["ggrep", "mcp"],
+      "command": [exe, "mcp"],
       "enabled": true
    });
 

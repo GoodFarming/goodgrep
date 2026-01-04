@@ -1,6 +1,6 @@
 # GGREP Query + Daemon Contracts (v0.1)
 
-Status: Draft v0.1  
+Status: Final v0.1 (SSOT)  
 Scope: `Tools/ggrep` (goodgrep repo)  
 Purpose: Lock query/daemon behavior for multi-agent reliability (QoS, errors, status/health schemas).
 
@@ -44,9 +44,10 @@ handshake and mismatch behavior.
 
 Client -> daemon:
 
+<!-- schema: handshake_request -->
 ```json
 {
-  "protocol_versions": [1],
+  "protocol_versions": [2],
   "store_id": "<store_id>",
   "config_fingerprint": "<sha256-hex>",
   "client_id": "agent-123",
@@ -56,10 +57,11 @@ Client -> daemon:
 
 Daemon -> client:
 
+<!-- schema: handshake_response -->
 ```json
 {
-  "protocol_version": 1,
-  "protocol_versions": [1],
+  "protocol_version": 2,
+  "protocol_versions": [2],
   "binary_version": "0.6.0",
   "supported_schema_versions": {
     "query_success": [1],
@@ -251,6 +253,7 @@ Wave II MUST standardize error codes:
 
 When `--json` is requested (or when called via MCP), errors MUST be structured:
 
+<!-- schema: query_error -->
 ```json
 {
   "error": {
@@ -281,6 +284,7 @@ agents can debug and tune behavior.
 
 Minimum required shape:
 
+<!-- schema: query_success -->
 ```json
 {
   "schema_version": 1,
@@ -291,6 +295,7 @@ Minimum required shape:
   "query_fingerprint": "<sha256-hex>",
   "embed_config_fingerprint": "<sha256-hex>",
   "snapshot_id": "01HZZ...",
+  "degraded": false,
   "git": { "head_sha": "abc123...", "dirty": true, "untracked_included": false },
   "mode": "planning",
   "limits": { "max_results": 20, "per_file": 3, "snippet": "short" },
@@ -306,6 +311,7 @@ Notes:
 - `schema_version` MUST be incremented only for breaking changes.
 - `request_id` MUST be unique per request (ULID recommended).
 - `snapshot_id` MUST match the pinned snapshot used for retrieval.
+- `degraded=true` indicates the snapshot published with indexing errors; clients SHOULD surface it.
 - `config_fingerprint` is the index fingerprint; `query_fingerprint` MUST reflect query-only knobs and must not
   force store reindexing.
 - `ignore_fingerprint` reflects ignore inputs; ignore-only changes should not require a new store.
@@ -350,6 +356,7 @@ Contract:
 When present, arrays MUST be deterministic and sorted by `code` (byte order). If `path_key` is present, it MUST be
 used as a secondary sort key (byte order).
 
+<!-- schema: limits_warnings -->
 ```json
 {
   "limits_hit": [
@@ -439,6 +446,7 @@ Queries SHOULD emit a structured log event with:
 
 `ggrep status --json` MUST emit a stable schema:
 
+<!-- schema: status -->
 ```json
 {
   "schema_version": 1,
@@ -451,7 +459,7 @@ Queries SHOULD emit a structured log event with:
     "pid": 1234,
     "started_at": "2026-01-01T12:00:00Z",
     "binary_version": "0.6.0",
-    "protocol_version": 1,
+    "protocol_version": 2,
     "stale": false,
     "supported_schema_versions": {
       "query_success": [1],
@@ -499,6 +507,20 @@ Queries SHOULD emit a structured log event with:
       "segments_open": 64,
       "segments_budget": 512
     }
+  },
+  "performance": {
+    "query_latency_p50_ms": 120,
+    "query_latency_p95_ms": 900,
+    "query_latency_budget_p50_ms": 300,
+    "query_latency_budget_p95_ms": 1500,
+    "segments_touched_max": 12,
+    "segments_touched_budget": 64,
+    "publish_time_last_ms": 120000,
+    "publish_time_budget_ms": 600000,
+    "gc_time_last_ms": 1500,
+    "gc_time_budget_ms": 120000,
+    "compaction_time_last_ms": 8000,
+    "compaction_time_budget_ms": 600000
   }
 }
 ```
@@ -512,6 +534,7 @@ Notes:
 
 Health is a set of checks with severities.
 
+<!-- schema: health -->
 ```json
 {
   "schema_version": 1,

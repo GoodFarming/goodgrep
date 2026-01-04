@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ggrep://schemas/status.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "store_id",
+    "canonical_root",
+    "config_fingerprint",
+    "ignore_fingerprint",
+    "daemon",
+    "snapshot",
+    "sync",
+    "queries",
+    "resources",
+    "performance"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "store_id": { "type": "string" },
+    "canonical_root": { "type": "string" },
+    "config_fingerprint": { "type": "string" },
+    "ignore_fingerprint": { "type": "string" },
+    "daemon": {
+      "type": "object",
+      "required": ["running", "pid", "started_at", "binary_version", "protocol_version", "stale", "supported_schema_versions"],
+      "properties": {
+        "running": { "type": "boolean" },
+        "pid": { "type": ["integer", "null"] },
+        "started_at": { "type": ["string", "null"] },
+        "binary_version": { "type": ["string", "null"] },
+        "protocol_version": { "type": ["integer", "null"] },
+        "stale": { "type": "boolean" },
+        "supported_schema_versions": {
+          "type": ["object", "null"],
+          "required": ["query_success", "query_error", "status", "health"],
+          "properties": {
+            "query_success": { "type": "array", "items": { "type": "integer" } },
+            "query_error": { "type": "array", "items": { "type": "integer" } },
+            "status": { "type": "array", "items": { "type": "integer" } },
+            "health": { "type": "array", "items": { "type": "integer" } }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "active_snapshot_id",
+        "head_sha",
+        "dirty",
+        "untracked_included",
+        "degraded",
+        "created_at"
+      ],
+      "properties": {
+        "active_snapshot_id": { "type": ["string", "null"] },
+        "head_sha": { "type": ["string", "null"] },
+        "dirty": { "type": ["boolean", "null"] },
+        "untracked_included": { "type": ["boolean", "null"] },
+        "degraded": { "type": "boolean" },
+        "created_at": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "sync": {
+      "type": "object",
+      "required": ["state", "last_sync_at", "last_result", "last_duration_ms", "staging_txn_id"],
+      "properties": {
+        "state": { "type": "string" },
+        "last_sync_at": { "type": ["string", "null"] },
+        "last_result": { "type": ["string", "null"] },
+        "last_duration_ms": { "type": ["integer", "null"] },
+        "staging_txn_id": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "queries": {
+      "type": "object",
+      "required": [
+        "max_concurrent",
+        "max_queue_depth",
+        "timeout_ms",
+        "in_flight",
+        "queue_depth",
+        "busy_total",
+        "timeouts_total",
+        "slow_total"
+      ],
+      "properties": {
+        "max_concurrent": { "type": "integer" },
+        "max_queue_depth": { "type": "integer" },
+        "timeout_ms": { "type": "integer" },
+        "in_flight": { "type": "integer" },
+        "queue_depth": { "type": "integer" },
+        "busy_total": { "type": "integer" },
+        "timeouts_total": { "type": "integer" },
+        "slow_total": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "required": ["embed_global", "disk", "open_handles"],
+      "properties": {
+        "embed_global": {
+          "type": "object",
+          "required": ["max_concurrent", "in_use", "stale_lock"],
+          "properties": {
+            "max_concurrent": { "type": "integer" },
+            "in_use": { "type": "integer" },
+            "stale_lock": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "disk": {
+          "type": "object",
+          "required": [
+            "store_bytes",
+            "store_budget_bytes",
+            "cache_bytes",
+            "cache_budget_bytes",
+            "log_bytes",
+            "log_budget_bytes"
+          ],
+          "properties": {
+            "store_bytes": { "type": "integer" },
+            "store_budget_bytes": { "type": "integer" },
+            "cache_bytes": { "type": "integer" },
+            "cache_budget_bytes": { "type": "integer" },
+            "log_bytes": { "type": "integer" },
+            "log_budget_bytes": { "type": "integer" }
+          },
+          "additionalProperties": false
+        },
+        "open_handles": {
+          "type": "object",
+          "required": ["segments_open", "segments_budget"],
+          "properties": {
+            "segments_open": { "type": "integer" },
+            "segments_budget": { "type": "integer" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "performance": {
+      "type": "object",
+      "required": [
+        "query_latency_p50_ms",
+        "query_latency_p95_ms",
+        "query_latency_budget_p50_ms",
+        "query_latency_budget_p95_ms",
+        "segments_touched_max",
+        "segments_touched_budget",
+        "publish_time_last_ms",
+        "publish_time_budget_ms",
+        "gc_time_last_ms",
+        "gc_time_budget_ms",
+        "compaction_time_last_ms",
+        "compaction_time_budget_ms"
+      ],
+      "properties": {
+        "query_latency_p50_ms": { "type": ["integer", "null"] },
+        "query_latency_p95_ms": { "type": ["integer", "null"] },
+        "query_latency_budget_p50_ms": { "type": "integer" },
+        "query_latency_budget_p95_ms": { "type": "integer" },
+        "segments_touched_max": { "type": ["integer", "null"] },
+        "segments_touched_budget": { "type": "integer" },
+        "publish_time_last_ms": { "type": ["integer", "null"] },
+        "publish_time_budget_ms": { "type": "integer" },
+        "gc_time_last_ms": { "type": ["integer", "null"] },
+        "gc_time_budget_ms": { "type": "integer" },
+        "compaction_time_last_ms": { "type": ["integer", "null"] },
+        "compaction_time_budget_ms": { "type": "integer" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

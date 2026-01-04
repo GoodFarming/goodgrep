@@ -1,0 +1,13 @@
+{
+  "protocol_version": 2,
+  "protocol_versions": [2],
+  "binary_version": "0.6.0",
+  "supported_schema_versions": {
+    "query_success": [1],
+    "query_error": [1],
+    "status": [1],
+    "health": [1]
+  },
+  "store_id": "<store_id>",
+  "config_fingerprint": "<sha256-hex>"
+}

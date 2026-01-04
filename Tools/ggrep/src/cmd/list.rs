@@ -6,17 +6,36 @@
 use std::{fs, time::SystemTime};
 
 use console::style;
+use serde::Serialize;
 
 use crate::{
    Result, config,
    util::{format_size, get_dir_size},
 };
 
+#[derive(Serialize)]
+struct StoresJson {
+   schema_version: u32,
+   stores:         Vec<StoreInfoJson>,
+}
+
+#[derive(Serialize)]
+struct StoreInfoJson {
+   store_id:   String,
+   size_bytes: u64,
+   modified_at: String,
+}
+
 /// Executes the list command to display all available stores.
-pub fn execute() -> Result<()> {
+pub fn execute(json: bool) -> Result<()> {
    let data_dir = config::data_dir();
 
    if !data_dir.exists() {
+      if json {
+         let payload = StoresJson { schema_version: 1, stores: Vec::new() };
+         println!("{}", serde_json::to_string_pretty(&payload)?);
+         return Ok(());
+      }
       println!("No stores found.");
       println!(
          "\nRun {} in a repository to create your first store.",
@@ -43,6 +62,11 @@ pub fn execute() -> Result<()> {
    }
 
    if stores.is_empty() {
+      if json {
+         let payload = StoresJson { schema_version: 1, stores: Vec::new() };
+         println!("{}", serde_json::to_string_pretty(&payload)?);
+         return Ok(());
+      }
       println!("No stores found.");
       println!(
          "\nRun {} in a repository to create your first store.",
@@ -52,6 +76,22 @@ pub fn execute() -> Result<()> {
    }
 
    stores.sort_by(|a, b| b.modified.cmp(&a.modified));
+
+   if json {
+      let payload = StoresJson {
+         schema_version: 1,
+         stores: stores
+            .iter()
+            .map(|store| StoreInfoJson {
+               store_id: store.name.clone(),
+               size_bytes: store.size,
+               modified_at: format_time_rfc3339(store.modified),
+            })
+            .collect(),
+      };
+      println!("{}", serde_json::to_string_pretty(&payload)?);
+      return Ok(());
+   }
 
    println!(
       "\n{} {}",
@@ -105,4 +145,9 @@ fn format_time_ago(time: SystemTime) -> String {
    } else {
       "just now".to_string()
    }
+}
+
+fn format_time_rfc3339(time: SystemTime) -> String {
+   let dt: chrono::DateTime<chrono::Utc> = time.into();
+   dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }

@@ -1,8 +1,12 @@
 # GGREP Phase II Hardening Plan (Wave II)
 
-Status: Draft v0.1  
+Status: Archived (Phase II; superseded by Phase III)  
 Owner: Engine Dev (ggrep)  
 Scope: Tools/ggrep in goodgrep repo
+
+This document is retained for historical context. Phase III (usefulness) SSOT:
+
+- `Tools/ggrep/Docs/Spec/GGREP-Spec-Index-v0.2.md`
 
 ## Phase II Scope Constraints (Execution)
 
@@ -618,12 +622,12 @@ Wave II contract details live in these spec documents (treat as SSOT):
 
 - `Tools/ggrep/Docs/Spec/GGREP-Snapshot-Index-Contracts-v0.1.md`
 - `Tools/ggrep/Docs/Spec/GGREP-Query-Daemon-Contracts-v0.1.md`
-- `Tools/ggrep/Docs/Spec/GGREP-Spec-Index-v0.1.md`
-- `Tools/ggrep/Docs/Spec/GGREP-Conformance-Map-v0.1.md`
+- `Tools/ggrep/Docs/Archive/Phase-II/Spec/GGREP-Spec-Index-v0.1.md`
+- `Tools/ggrep/Docs/Archive/Phase-II/Spec/GGREP-Conformance-Map-v0.1.md`
 
 Execution checklist:
 
-- `Tools/ggrep/Docs/Plan/GGREP-Phase-II-Implementation-Checklist-v0.1.md`
+- `Tools/ggrep/Docs/Archive/Phase-II/Plan/GGREP-Phase-II-Implementation-Checklist-v0.1.md`
 
 ## Implementation Tickets (Streams A/B/D/E/G/H/I)
 
@@ -791,6 +795,11 @@ Execution checklist:
 
 **D6 - Performance + operability budgets**
 - Define p95 query latency targets, max segments touched, max publish time, and GC time budgets.
+- Initial Phase II budgets (tunable, measured on Linux CPU-only dev boxes):
+  - Query latency (balanced mode, warm cache): p50 <= 300ms, p95 <= 1500ms.
+  - Max segments touched per query: <= 64 (aligns with `max_open_segments_per_query`).
+  - Publish time per sync: <= 600s for <= `max_bytes_per_sync` of changes.
+  - GC pass time: <= 120s for typical stores; compaction pass <= 600s.
 - Surface budgets + current values in `status`/`health` and add perf smoke checks.
 - Acceptance tests: perf budgets reported; regressions flagged in CI or nightly runs.
 
@@ -1064,4 +1073,4 @@ Execution checklist:
 
 ## Workflow Diagram
 
-See `Tools/ggrep/Docs/Plan/ggrep-sync-index-lifecycle.mmd`.
+See `Tools/ggrep/Docs/Spec/Diagrams/ggrep-sync-index-lifecycle.mmd`.

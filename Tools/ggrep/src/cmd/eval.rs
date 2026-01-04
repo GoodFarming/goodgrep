@@ -24,9 +24,10 @@ use crate::{
    config,
    embed::worker::EmbedWorker,
    file::LocalFileSystem,
-   git,
+   identity,
+   snapshot::{SnapshotManager, SnapshotView},
    search::{SearchEngine, profile::bucket_for_path},
-   store::{LanceStore, Store},
+   store::LanceStore,
    sync::{SyncEngine, SyncResult},
    types::{ChunkType, SearchMode},
    version,
@@ -118,7 +119,7 @@ struct EvalCase {
    notes: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct EvalReport {
    meta:    EvalMeta,
    sync:    EvalSync,
@@ -126,7 +127,7 @@ struct EvalReport {
    cases:   Vec<EvalCaseReport>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct EvalMeta {
    started_at_utc: String,
    elapsed_ms:     u128,
@@ -139,7 +140,7 @@ struct EvalMeta {
    overrides:      EvalOverrides,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct EvalConfig {
    dense_model:        String,
    colbert_model:      String,
@@ -154,7 +155,7 @@ struct EvalConfig {
    low_impact:         bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct EvalOverrides {
    k:               Option<usize>,
    per_file:        Option<usize>,
@@ -164,7 +165,7 @@ struct EvalOverrides {
    no_sync:         bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct EvalSync {
    processed: usize,
    indexed:   usize,
@@ -172,7 +173,7 @@ struct EvalSync {
    deleted:   usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct EvalSummary {
    total:         usize,
    passed:        usize,
@@ -182,7 +183,7 @@ struct EvalSummary {
    by_mode:       BTreeMap<SearchMode, EvalModeSummary>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct EvalModeSummary {
    total:     usize,
    passed:    usize,
@@ -190,7 +191,7 @@ struct EvalModeSummary {
    mean_mrr:  f32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct EvalCaseReport {
    id:             String,
    query:          String,
@@ -206,7 +207,7 @@ struct EvalCaseReport {
    hits:           Vec<EvalHit>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct EvalHit {
    rank:       usize,
    path:       String,
@@ -240,10 +241,15 @@ pub async fn execute(
    eval_store: bool,
    fail_under_pass_rate: Option<f32>,
    fail_under_mrr: Option<f32>,
+   baseline: Option<PathBuf>,
+   baseline_max_drop_pass_rate: Option<f32>,
+   baseline_max_drop_mrr: Option<f32>,
    store_id: Option<String>,
 ) -> Result<()> {
    let root = std::env::current_dir()?;
    let search_path = path.unwrap_or_else(|| root.clone()).canonicalize()?;
+   let index_identity = identity::resolve_index_identity(&search_path)?;
+   let index_root = index_identity.canonical_root.clone();
 
    let resolved_store_id = match store_id {
       Some(s) => {
@@ -254,7 +260,7 @@ pub async fn execute(
          }
       },
       None => {
-         let base = git::resolve_store_id(&search_path)?;
+         let base = index_identity.store_id;
          if eval_store {
             format!("{base}-eval")
          } else {
@@ -263,7 +269,7 @@ pub async fn execute(
       },
    };
 
-   let resolved_suite_path = resolve_suite_path(&search_path, suite_path)?;
+   let resolved_suite_path = resolve_suite_path(&index_root, suite_path)?;
    let mut suite = load_suite(&resolved_suite_path)?;
 
    if !only.is_empty() {
@@ -356,7 +362,7 @@ pub async fn execute(
       pb.set_message("...");
 
       let sync_result = sync_engine
-         .initial_sync(&resolved_store_id, &search_path, false, &mut pb)
+         .initial_sync(&resolved_store_id, &search_path, None, false, &mut pb)
          .await?;
       pb.finish_with_message(format!(
          "Index sync complete (indexed={}, skipped={}, deleted={})",
@@ -365,14 +371,30 @@ pub async fn execute(
       sync_result
    };
 
-   let engine = SearchEngine::new(store, embedder);
+   let engine = SearchEngine::new(store.clone(), embedder);
+   let fingerprints = identity::compute_fingerprints(&search_path)?;
+   let snapshot_manager = SnapshotManager::new(
+      store.clone(),
+      resolved_store_id.clone(),
+      fingerprints.config_fingerprint,
+      fingerprints.ignore_fingerprint,
+   );
+   let snapshot_view = snapshot_manager.open_snapshot_view().await?;
 
    let mut case_reports = Vec::with_capacity(suite.cases.len());
    for (idx, case) in suite.cases.iter().enumerate() {
       println!("{}", style(format!("[{}/{}] {}", idx + 1, suite.cases.len(), case.id)).cyan());
       let report =
-         evaluate_case(&engine, &resolved_store_id, &search_path, &suite.defaults, case, overrides)
-            .await?;
+         evaluate_case(
+            &engine,
+            &snapshot_view,
+            &resolved_store_id,
+            &search_path,
+            &suite.defaults,
+            case,
+            overrides,
+         )
+         .await?;
       println!(
          "  {}  first_hit={}  mrr={:.3}",
          if report.passed {
@@ -446,7 +468,33 @@ pub async fn execute(
    println!("Report: {}", style(resolved_out_path.display()).dim());
    println!("Build:  {}", style(version::GIT_HASH).dim());
 
-   if let Some(threshold) = fail_under_pass_rate
+   let mut min_pass_rate = fail_under_pass_rate;
+   let mut min_mrr = fail_under_mrr;
+
+   if let Some(baseline_path) = baseline {
+      let raw = std::fs::read_to_string(&baseline_path)?;
+      let baseline_report: EvalReport = serde_json::from_str(&raw)?;
+      let drop_pass = baseline_max_drop_pass_rate.unwrap_or(0.0).max(0.0);
+      let drop_mrr = baseline_max_drop_mrr.unwrap_or(0.0).max(0.0);
+      let baseline_pass = (baseline_report.summary.pass_rate - drop_pass).max(0.0);
+      let baseline_mrr = (baseline_report.summary.mean_mrr - drop_mrr).max(0.0);
+      min_pass_rate = Some(min_pass_rate.map_or(baseline_pass, |v| v.max(baseline_pass)));
+      min_mrr = Some(min_mrr.map_or(baseline_mrr, |v| v.max(baseline_mrr)));
+
+      println!(
+         "{}",
+         style(format!(
+            "Baseline: pass_rate {:.3}, mean_mrr {:.3} (allowed drops: {:.3}, {:.3})",
+            baseline_report.summary.pass_rate,
+            baseline_report.summary.mean_mrr,
+            drop_pass,
+            drop_mrr
+         ))
+         .dim()
+      );
+   }
+
+   if let Some(threshold) = min_pass_rate
       && report.summary.pass_rate < threshold
    {
       return Err(
@@ -461,7 +509,7 @@ pub async fn execute(
       );
    }
 
-   if let Some(threshold) = fail_under_mrr
+   if let Some(threshold) = min_mrr
       && report.summary.mean_mrr < threshold
    {
       return Err(
@@ -476,7 +524,7 @@ pub async fn execute(
    Ok(())
 }
 
-fn resolve_suite_path(search_path: &Path, suite_path: Option<PathBuf>) -> Result<PathBuf> {
+fn resolve_suite_path(search_root: &Path, suite_path: Option<PathBuf>) -> Result<PathBuf> {
    if let Some(p) = suite_path {
       if p.exists() {
          return Ok(p);
@@ -492,11 +540,9 @@ fn resolve_suite_path(search_path: &Path, suite_path: Option<PathBuf>) -> Result
       return Ok(cwd_default);
    }
 
-   if let Some(repo_root) = git::get_repo_root(search_path) {
-      let repo_default = repo_root.join("Datasets/ggrep/eval_cases.toml");
-      if repo_default.exists() {
-         return Ok(repo_default);
-      }
+   let repo_default = search_root.join("Datasets/ggrep/eval_cases.toml");
+   if repo_default.exists() {
+      return Ok(repo_default);
    }
 
    Err(io::Error::new(io::ErrorKind::NotFound, "eval suite not found (pass --cases <path>)").into())
@@ -540,6 +586,7 @@ fn parse_mode(mode: &str) -> std::result::Result<SearchMode, String> {
 
 async fn evaluate_case(
    engine: &SearchEngine,
+   snapshot: &SnapshotView,
    store_id: &str,
    root: &Path,
    defaults: &EvalDefaults,
@@ -565,11 +612,12 @@ async fn evaluate_case(
 
    let response = engine
       .search_with_mode(
+         snapshot,
          store_id,
          &case.query,
          k,
          per_file,
-         Some(root),
+         None,
          rerank,
          include_anchors,
          mode,

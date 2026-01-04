@@ -8,7 +8,9 @@ use console::style;
 use tokio::time;
 
 use crate::{
-   Result, git,
+   Result,
+   cmd::daemon::{HandshakeOutcome, client_handshake},
+   config, identity,
    ipc::{self, Request, Response},
    usock,
 };
@@ -53,7 +55,8 @@ pub async fn execute(path: Option<PathBuf>) -> Result<()> {
    let root = env::current_dir()?;
    let target_path = path.unwrap_or(root);
 
-   let store_id = git::resolve_store_id(&target_path)?;
+   let index_identity = identity::resolve_index_identity(&target_path)?;
+   let store_id = index_identity.store_id;
 
    if !usock::socket_path(&store_id).exists() {
       println!("{}", style("No server running for this project").yellow());
@@ -68,6 +71,19 @@ pub async fn execute(path: Option<PathBuf>) -> Result<()> {
    };
 
    if let Some(mut stream) = stream {
+      let handshake = time::timeout(
+         RPC_TIMEOUT,
+         client_handshake(&mut stream, &store_id, &index_identity.config_fingerprint, "ggrep-stop"),
+      )
+      .await;
+      if !matches!(handshake, Ok(Ok(HandshakeOutcome::Compatible))) {
+         _ = force_kill_if_possible(&store_id);
+         usock::remove_socket(&store_id);
+         usock::remove_pid(&store_id);
+         println!("{}", style("Server incompatible; removed socket").yellow());
+         return Ok(());
+      }
+
       let sent = time::timeout(RPC_TIMEOUT, buffer.send(&mut stream, &Request::Shutdown)).await;
       if !matches!(sent, Ok(Ok(()))) {
          _ = force_kill_if_possible(&store_id);
@@ -77,7 +93,11 @@ pub async fn execute(path: Option<PathBuf>) -> Result<()> {
          return Ok(());
       }
 
-      let recv = time::timeout(RPC_TIMEOUT, buffer.recv::<_, Response>(&mut stream)).await;
+      let recv = time::timeout(
+         RPC_TIMEOUT,
+         buffer.recv_with_limit(&mut stream, config::get().max_response_bytes),
+      )
+      .await;
       match recv {
          Ok(Ok(Response::Shutdown { success: true })) => {
             println!("{}", style("Server stopped").green());

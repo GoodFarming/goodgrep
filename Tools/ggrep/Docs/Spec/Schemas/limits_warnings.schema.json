@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ggrep://schemas/limits_warnings.schema.json",
+  "type": "object",
+  "properties": {
+    "limits_hit": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "limit"],
+        "properties": {
+          "code": { "type": "string" },
+          "limit": { "type": "integer" },
+          "observed": { "type": "integer" },
+          "path_key": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "path_key": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
